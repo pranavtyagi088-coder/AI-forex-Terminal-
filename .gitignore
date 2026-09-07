@@ -1,0 +1,11 @@
+﻿backend/venv/
+frontend/node_modules/
+frontend/dist/
+*.db
+uploads/
+__pycache__/
+*.pyc
+.idea/
+Volume 1/
+*.zip
+.DS_Store

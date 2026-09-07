@@ -1,0 +1,45 @@
+# --- Web framework ---
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+
+# --- Data layer ---
+sqlalchemy==2.0.52
+asyncpg==0.31.0
+aiosqlite==0.22.1
+alembic==1.19.1
+
+# --- Validation / settings ---
+pydantic==2.13.4
+pydantic-settings==2.15.0
+
+# --- Background jobs / realtime ---
+arq==0.28.0
+redis==5.3.1
+
+# --- Market data / HTTP ---
+httpx==0.28.1
+
+# --- Technical indicators (real computation, not AI-guessed) ---
+ta==0.11.0
+pandas==2.3.3
+numpy==2.3.4
+
+# --- AI vision providers (provider-agnostic adapter uses both) ---
+openai==3.3.1
+anthropic==1.0.0
+
+# --- Images ---
+pillow==12.3.0
+aiofiles==25.1.0
+
+# --- Auth (wired up for real this time) ---
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+
+# --- Observability ---
+structlog==26.1.0
+
+# --- Testing ---
+pytest==9.1.1
+pytest-asyncio==1.4.0

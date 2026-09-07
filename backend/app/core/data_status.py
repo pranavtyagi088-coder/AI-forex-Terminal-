@@ -1,0 +1,10 @@
+from enum import Enum
+
+class DataStatus(str, Enum):
+    LIVE = "LIVE"
+    DELAYED = "DELAYED"
+    SIMULATED = "SIMULATED"
+    UNAVAILABLE = "UNAVAILABLE"
+    USER_UPLOAD = "USER_UPLOAD"
+    AI_INTERPRETATION = "AI_INTERPRETATION"
+    MANUAL = "MANUAL"

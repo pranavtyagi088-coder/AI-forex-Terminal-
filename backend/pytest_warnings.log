@@ -1,0 +1,215 @@
+﻿F..............................F...F.....F.......F                       [100%]
+================================== FAILURES ===================================
+______________________________ test_health_check ______________________________
+tests\test_api_routes.py:14: in test_health_check
+    assert data["version"] == "3.0.0"
+E   AssertionError: assert '2.0.0' == '3.0.0'
+E     
+E     - 3.0.0
+E     ? ^
+E     + 2.0.0
+E     ? ^
+_______________________ test_use_strategy_api_pipeline ________________________
+tests\test_step26_pipeline.py:86: in test_use_strategy_api_pipeline
+    rec_res = client.get("/api/strategy/recommend?symbol=EUR/USD", headers=AUTH_HEADERS)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\testclient.py:483: in get
+    return super().get(
+venv\Lib\site-packages\httpx2\_client.py:1113: in get
+    return self.request(
+venv\Lib\site-packages\starlette\testclient.py:455: in request
+    return super().request(
+venv\Lib\site-packages\httpx2\_client.py:797: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx2\_client.py:980: in send
+    response = self._send_handling_auth(
+venv\Lib\site-packages\httpx2\_client.py:1008: in _send_handling_auth
+    response = self._send_handling_redirects(
+venv\Lib\site-packages\httpx2\_client.py:1043: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx2\_client.py:1076: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\testclient.py:354: in handle_request
+    raise exc
+venv\Lib\site-packages\starlette\testclient.py:351: in handle_request
+    portal.call(self.app, scope, receive, send)
+venv\Lib\site-packages\anyio\from_thread.py:338: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py:454: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py:396: in __get_result
+    raise self._exception
+venv\Lib\site-packages\anyio\from_thread.py:263: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+venv\Lib\site-packages\starlette\applications.py:96: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+venv\Lib\site-packages\starlette\middleware\cors.py:88: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:670: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:2734: in app
+    await route.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1800: in _handle_selected
+    await original_route.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1279: in handle
+    await app(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:158: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\routing.py:144: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\routing.py:706: in app
+    raw_response = await run_endpoint_function(
+venv\Lib\site-packages\fastapi\routing.py:352: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\routes\strategy.py:41: in recommend_strategies
+    market_state = build_market_state(df, symbol)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\engines\strategy\market_state.py:117: in build_market_state
+    regime = classify_regime(snap.trend_strength, snap.trend_direction, snap.atr_pct)
+                                                                        ^^^^^^^^^^^^
+venv\Lib\site-packages\pydantic\main.py:1042: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'TechnicalSnapshot' object has no attribute 'atr_pct'
+________________ test_performance_api_strategy_detail_and_eval ________________
+tests\test_step27_decay_performance.py:58: in test_performance_api_strategy_detail_and_eval
+    assert detail_res.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = <Response [404 Not Found]>.status_code
+______________________ test_strategy_recommend_endpoint _______________________
+tests\test_strategy_engine.py:95: in test_strategy_recommend_endpoint
+    response = client.get(
+venv\Lib\site-packages\starlette\testclient.py:483: in get
+    return super().get(
+venv\Lib\site-packages\httpx2\_client.py:1113: in get
+    return self.request(
+venv\Lib\site-packages\starlette\testclient.py:455: in request
+    return super().request(
+venv\Lib\site-packages\httpx2\_client.py:797: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx2\_client.py:980: in send
+    response = self._send_handling_auth(
+venv\Lib\site-packages\httpx2\_client.py:1008: in _send_handling_auth
+    response = self._send_handling_redirects(
+venv\Lib\site-packages\httpx2\_client.py:1043: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx2\_client.py:1076: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\testclient.py:354: in handle_request
+    raise exc
+venv\Lib\site-packages\starlette\testclient.py:351: in handle_request
+    portal.call(self.app, scope, receive, send)
+venv\Lib\site-packages\anyio\from_thread.py:338: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py:454: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py:396: in __get_result
+    raise self._exception
+venv\Lib\site-packages\anyio\from_thread.py:263: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+venv\Lib\site-packages\starlette\applications.py:96: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+venv\Lib\site-packages\starlette\middleware\cors.py:88: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:670: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:2734: in app
+    await route.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1800: in _handle_selected
+    await original_route.handle(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:1279: in handle
+    await app(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:158: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\routing.py:144: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\routing.py:706: in app
+    raw_response = await run_endpoint_function(
+venv\Lib\site-packages\fastapi\routing.py:352: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\routes\strategy.py:41: in recommend_strategies
+    market_state = build_market_state(df, symbol)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\engines\strategy\market_state.py:117: in build_market_state
+    regime = classify_regime(snap.trend_strength, snap.trend_direction, snap.atr_pct)
+                                                                        ^^^^^^^^^^^^
+venv\Lib\site-packages\pydantic\main.py:1042: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'TechnicalSnapshot' object has no attribute 'atr_pct'
+___________________ test_market_candles_endpoint_with_mock ____________________
+tests\test_upload_and_market.py:58: in test_market_candles_endpoint_with_mock
+    assert data["bars_count"] == 2
+           ^^^^^^^^^^^^^^^^^^
+E   KeyError: 'bars_count'
+============================== warnings summary ===============================
+tests/test_step28_backtest.py::test_backtest_api_run_endpoint
+  C:\Users\PRANAV TYAGI\PycharmProjects\WelcomeScreen\backend\venv\Lib\site-packages\sqlalchemy\sql\schema.py:3627: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_api_routes.py::test_health_check - AssertionError: assert '...
+FAILED tests/test_step26_pipeline.py::test_use_strategy_api_pipeline - Attrib...
+FAILED tests/test_step27_decay_performance.py::test_performance_api_strategy_detail_and_eval
+FAILED tests/test_strategy_engine.py::test_strategy_recommend_endpoint - Attr...
+FAILED tests/test_upload_and_market.py::test_market_candles_endpoint_with_mock
+5 failed, 45 passed, 1 warning in 23.46s

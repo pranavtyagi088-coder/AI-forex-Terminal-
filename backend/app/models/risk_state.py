@@ -1,5 +1,5 @@
-"""
-Account-level risk state.
+﻿"""
+Account-level risk state with circuit breaker persistence.
 """
 
 from datetime import datetime, timezone
@@ -20,4 +20,10 @@ class RiskState(Base):
     daily_loss_limit_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     max_drawdown_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     max_leverage: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+
+    # Circuit Breaker Fields
+    breaker_state: Mapped[str] = mapped_column(String(20), default="NORMAL")
+    breaker_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    breaker_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

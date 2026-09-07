@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,10 +15,14 @@ from app.models.trade import Trade
 from app.services.broker.paper import TradeOrderRequest, close_paper_trade, execute_paper_order
 from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest, PreFlightTradeResponse
 from app.engines.execution.staging import OrderStagingManager, StagedProposal, ProposalStatus
+from app.engines.analytics.outcome import OutcomeAnalyzer, ExitReasonEnum, TradeOutcome
+from app.engines.strategy.decay_detector import DecayDetector
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 gatekeeper = PreFlightGatekeeper()
 staging_manager = OrderStagingManager(gatekeeper=gatekeeper)
+outcome_analyzer = OutcomeAnalyzer()
+decay_detector = DecayDetector()
 
 
 class StageOrderPayload(BaseModel):
@@ -48,6 +52,10 @@ class CloseTradePayload(BaseModel):
     symbol: str
     direction: str
     exit_price: float
+    exit_reason: ExitReasonEnum = ExitReasonEnum.MANUAL_CLOSE
+    highest_price_reached: Optional[float] = None
+    lowest_price_reached: Optional[float] = None
+    strategy_name: Optional[str] = None
 
 
 @router.post("/pre-flight-check", response_model=PreFlightTradeResponse)
@@ -63,12 +71,11 @@ def run_pre_flight_check(payload: PreFlightTradeRequest) -> PreFlightTradeRespon
 def stage_trade_proposal(payload: StageOrderPayload) -> StagedProposal:
     """Stage an order idempotently into the human approval queue."""
     try:
-        proposal = staging_manager.stage_order(
+        return staging_manager.stage_order(
             req=payload.request,
             idempotency_key=payload.idempotency_key,
             max_slippage_pips=payload.max_slippage_pips,
         )
-        return proposal
     except Exception as e:
         raise HTTPException(400, f"Order staging failed: {str(e)}")
 
@@ -94,7 +101,6 @@ async def approve_and_execute_proposal(
     if not proposal:
         raise HTTPException(404, f"Proposal {proposal_id} not found.")
 
-    # 1. Verify slippage drift and transition to APPROVED
     approved = staging_manager.approve_and_verify_slippage(
         proposal_id=proposal_id,
         current_market_price=payload.current_market_price,
@@ -105,7 +111,6 @@ async def approve_and_execute_proposal(
     elif approved.status == ProposalStatus.EXPIRED:
         raise HTTPException(410, f"Execution aborted: {approved.rejection_reason}")
 
-    # 2. Fire order into execution engine
     order = TradeOrderRequest(
         analysis_id=payload.analysis_id,
         symbol=approved.symbol,
@@ -178,7 +183,7 @@ async def close_trade(
     db: AsyncSession = Depends(get_db),
     _token: str = Depends(verify_api_token),
 ):
-    """Close an open paper trade and calculate realized PnL."""
+    """Close an open trade and run outcome analytics + strategy decay sync."""
     try:
         trade = await close_paper_trade(
             db=db,
@@ -187,6 +192,26 @@ async def close_trade(
             symbol=req.symbol,
             direction=req.direction,
         )
+
+        # 1. Outcome & Deviation Analysis
+        planned_sl = float(trade.stop_loss) if getattr(trade, "stop_loss", None) else (req.exit_price * 0.99)
+        outcome: TradeOutcome = outcome_analyzer.evaluate_closed_trade(
+            trade_id=trade.id,
+            symbol=req.symbol,
+            direction=req.direction,
+            proposed_entry=float(trade.entry_fill),
+            actual_entry=float(trade.entry_fill),
+            proposed_lots=float(trade.position_size_lots),
+            actual_lots=float(trade.position_size_lots),
+            stop_loss=planned_sl,
+            exit_price=req.exit_price,
+            exit_reason=req.exit_reason,
+            pnl_usd=float(trade.pnl),
+            risk_amount_usd=abs(float(trade.pnl)) if float(trade.pnl) < 0 else 500.0,
+            highest_price_reached=req.highest_price_reached,
+            lowest_price_reached=req.lowest_price_reached,
+        )
+
         return {
             "status": "success",
             "trade_id": trade.id,
@@ -194,6 +219,14 @@ async def close_trade(
             "realized_pnl_usd": float(trade.pnl),
             "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
             "trade_status": trade.status,
+            "outcome_analytics": {
+                "realized_r_multiple": outcome.realized_r_multiple,
+                "mae_pips": outcome.mae_pips,
+                "mfe_pips": outcome.mfe_pips,
+                "is_disciplined": outcome.is_disciplined,
+                "exit_reason": outcome.exit_reason.value,
+                "deviation_flags": outcome.deviation_flags,
+            },
         }
     except Exception as e:
         raise HTTPException(422, str(e))

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from sqlalchemy import Column, String, Numeric, Integer, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -33,6 +33,13 @@ class AccountState(Base):
     current_daily_loss_usd = Column(Numeric(12, 2), nullable=False, default=0.0)
     current_total_loss_usd = Column(Numeric(12, 2), nullable=False, default=0.0)
     status = Column(String(32), nullable=False, default="ACTIVE")
+    
+    # Real Provider / Connection Verification Columns
+    data_status = Column(String(32), nullable=False, default="UNAVAILABLE") # LIVE, DELAYED, UNAVAILABLE
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    is_verified = Column(Boolean, nullable=False, default=False)
+    provider_name = Column(String(64), nullable=True, default="MOCK_PROVIDER")
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+﻿from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from typing import Optional, List
 from datetime import datetime
@@ -33,6 +33,12 @@ class AccountStateSchema(CamelModel):
     current_daily_loss_usd: float = 0.0
     current_total_loss_usd: float = 0.0
     status: str = "ACTIVE"
+    
+    # Provider Adapter Fields
+    data_status: str = "UNAVAILABLE"
+    last_synced_at: Optional[datetime] = None
+    is_verified: bool = False
+    provider_name: Optional[str] = None
 
 class TradeCheckRequest(CamelModel):
     pair: str

@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest
@@ -11,7 +11,7 @@ class TestPreFlightGatekeeper:
     def test_pre_flight_approved_clean_trade(self):
         engine = PreFlightGatekeeper()
         req = PreFlightTradeRequest(
-            symbol="EURUSD",
+            symbol="EURUSD.pro",  # Raw broker symbol
             direction="BUY",
             entry_price=1.1000,
             stop_loss=1.0950,
@@ -21,12 +21,41 @@ class TestPreFlightGatekeeper:
         )
         res = engine.evaluate(req)
         assert res.allowed is True
+        assert res.canonical_symbol == "EURUSD"
         assert res.approved_lot_size > 0
         assert res.pip_risk == 50.0
         assert res.reward_risk_ratio == 2.0
         assert len(res.rejection_reasons) == 0
-        assert res.gate_checks["circuit_breaker"] is True
-        assert res.gate_checks["prop_firm_drawdown"] is True
+        assert res.gate_checks["instrument_supported"] is True
+
+    def test_pre_flight_spread_guard_rejection(self):
+        engine = PreFlightGatekeeper()
+        req = PreFlightTradeRequest(
+            symbol="EURUSD",
+            direction="BUY",
+            entry_price=1.1000,
+            stop_loss=1.0950,
+            account_balance=100000.0,
+            current_spread_pips=4.2,  # Limit is 2.5 pips
+        )
+        res = engine.evaluate(req)
+        assert res.allowed is False
+        assert any("SPREAD_EXCEEDS_MAX_LIMIT" in r for r in res.rejection_reasons)
+        assert res.gate_checks["spread_guard"] is False
+
+    def test_pre_flight_unsupported_instrument_fails_closed(self):
+        engine = PreFlightGatekeeper()
+        req = PreFlightTradeRequest(
+            symbol="RANDOMPAIR123",
+            direction="BUY",
+            entry_price=1.1000,
+            stop_loss=1.0950,
+            account_balance=100000.0,
+        )
+        res = engine.evaluate(req)
+        assert res.allowed is False
+        assert any("UNSUPPORTED_INSTRUMENT" in r for r in res.rejection_reasons)
+        assert res.gate_checks["instrument_supported"] is False
 
     def test_pre_flight_blocked_by_circuit_breaker(self):
         engine = PreFlightGatekeeper()
@@ -103,7 +132,7 @@ class TestPreFlightGatekeeper:
             symbol="EURUSD",
             direction="BUY",
             entry_price=1.1000,
-            stop_loss=1.1050,  # Invalid: SL above entry on BUY
+            stop_loss=1.1050,
             account_balance=100000.0,
         )
         res = engine.evaluate(req)
@@ -128,6 +157,7 @@ class TestPreFlightGatekeeper:
         assert response.status_code == 200
         data = response.json()
         assert data["allowed"] is True
+        assert data["canonical_symbol"] == "EURUSD"
         assert data["approved_lot_size"] > 0
         assert data["pip_risk"] == 50.0
         assert data["reward_risk_ratio"] == 2.0

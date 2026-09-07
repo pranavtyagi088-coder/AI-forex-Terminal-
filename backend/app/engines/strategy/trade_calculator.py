@@ -1,7 +1,10 @@
-﻿from dataclasses import dataclass
+﻿from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from app.models.instrument import Instrument
-from app.engines.risk.calculator import calculate_position_size
+from app.engines.risk.calculator import calculate_position_size, RiskRequest
+
 
 @dataclass
 class TradeCalculationResult:
@@ -17,10 +20,11 @@ class TradeCalculationResult:
     is_valid_rr: bool
     rejection_reason: Optional[str] = None
 
+
 class DeterministicTradeCalculator:
     """
-    Module 4: Computes exact entry, SL, TP, RR, and Position Size
-    strictly from deterministic math and strategy rules.
+    Computes exact entry, SL, TP, RR, and Position Size
+    strictly from deterministic math and canonical risk engine.
     """
 
     @staticmethod
@@ -31,14 +35,19 @@ class DeterministicTradeCalculator:
         account_balance: float,
         risk_percent: float,
         direction: str,
-        exchange_rate: float = 1.0
+        exchange_rate: float = 1.0,
+        live_rates: Optional[Dict[str, float]] = None
     ) -> TradeCalculationResult:
-        # Safeguard strategy_rules if None
         rules = strategy_rules or {}
+        if live_rates is None:
+            live_rates = {}
 
-        # Cast pip_size and contract_size from Decimal to float safely
         pip_size = float(instrument.pip_size)
         contract_size = float(instrument.contract_size)
+        quote_cur = getattr(instrument, "quote_currency", "USD") or "USD"
+
+        if exchange_rate and exchange_rate != 1.0 and f"USD{quote_cur}" not in live_rates:
+            live_rates[f"USD{quote_cur}"] = exchange_rate
 
         current_price = float(market_state.get("current_price", 0.0))
         atr = float(market_state.get("atr", pip_size * 20.0))
@@ -103,36 +112,27 @@ class DeterministicTradeCalculator:
         rr_ratio = round(tp_dist / sl_dist, 2) if sl_dist > 0 else 0.0
         is_valid_rr = rr_ratio >= min_rr
 
-        # Deterministic Position Size
-        position_size_lots = 0.0
-        risk_amount = account_balance * (risk_percent / 100.0)
+        # Canonical Position Sizing Call
+        risk_req = RiskRequest(
+            account_balance=account_balance,
+            risk_percent=risk_percent,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit_1=take_profit,
+            pip_size=pip_size,
+            contract_size=contract_size,
+            quote_currency=quote_cur,
+            symbol=instrument.symbol
+        )
 
         try:
-            risk_result = calculate_position_size(
-                account_balance,
-                risk_percent,
-                entry_price,
-                stop_loss,
-                instrument,
-                exchange_rate
-            )
-            if hasattr(risk_result, "position_size_lots"):
-                position_size_lots = float(risk_result.position_size_lots)
-                risk_amount = float(getattr(risk_result, "risk_amount", risk_amount))
-            elif isinstance(risk_result, dict):
-                position_size_lots = float(risk_result.get("position_size_lots", 0.0))
-                risk_amount = float(risk_result.get("risk_amount", risk_amount))
-            elif isinstance(risk_result, (int, float)):
-                position_size_lots = float(risk_result)
+            risk_result = calculate_position_size(risk_req, live_rates)
+            position_size_lots = risk_result.position_size_lots
+            risk_amount = risk_result.risk_amount_usd
         except Exception:
-            pip_value_per_lot = pip_size * contract_size
-            if pip_value_per_lot > 0 and sl_pips > 0:
-                position_size_lots = round(risk_amount / (sl_pips * pip_value_per_lot), 4)
-
-        if position_size_lots <= 0:
-            pip_value_per_lot = pip_size * contract_size
-            if pip_value_per_lot > 0 and sl_pips > 0:
-                position_size_lots = round(risk_amount / (sl_pips * pip_value_per_lot), 4)
+            pip_val = pip_size * contract_size
+            risk_amount = account_balance * (risk_percent / 100.0)
+            position_size_lots = round(risk_amount / (sl_pips * pip_val), 2) if sl_pips * pip_val > 0 else 0.01
 
         rejection_reason = None
         if not is_valid_rr:

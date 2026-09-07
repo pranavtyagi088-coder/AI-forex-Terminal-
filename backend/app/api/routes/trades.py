@@ -1,4 +1,4 @@
-"""API routes for managing live and paper trades."""
+﻿"""API routes for managing live, paper trades, and pre-flight risk checks."""
 
 from __future__ import annotations
 
@@ -11,8 +11,10 @@ from app.core.auth import verify_api_token
 from app.core.database import get_db
 from app.models.trade import Trade
 from app.services.broker.paper import TradeOrderRequest, close_paper_trade, execute_paper_order
+from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest, PreFlightTradeResponse
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
+gatekeeper = PreFlightGatekeeper()
 
 
 class OpenTradePayload(BaseModel):
@@ -31,6 +33,16 @@ class CloseTradePayload(BaseModel):
     symbol: str
     direction: str
     exit_price: float
+
+
+@router.post("/pre-flight-check", response_model=PreFlightTradeResponse)
+def run_pre_flight_check(payload: PreFlightTradeRequest) -> PreFlightTradeResponse:
+    """Evaluate aggregate pre-flight safety gates before order staging."""
+    try:
+        result = gatekeeper.evaluate(payload)
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"Pre-flight evaluation error: {str(e)}")
 
 
 @router.post("/execute")

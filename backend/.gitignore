@@ -1,0 +1,29 @@
+﻿# Environments & Cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+
+# Databases & Runtime State
+*.db
+*.sqlite3
+breaker_state.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
+logs/

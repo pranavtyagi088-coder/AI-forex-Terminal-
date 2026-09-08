@@ -14,10 +14,6 @@ def safe_divide(numerator: float, denominator: float) -> float:
 
 
 def resolve_pip_value(pair: str, lot_size: float, live_rates: Optional[Dict[str, float]] = None) -> float:
-    """
-    Canonical pip value resolver per trade lot size.
-    Uses contract size 100,000 for standard FX.
-    """
     clean_pair = pair.replace("/", "").replace("_", "").upper()
     quote_cur = clean_pair[3:] if len(clean_pair) >= 6 else "USD"
     pip_size = 0.01 if "JPY" in clean_pair else 0.0001
@@ -45,47 +41,73 @@ def evaluate_trade_risk(
     violations = []
     warnings = []
 
+    # Defensive reading of dynamic profile attributes
+    allow_news = bool(getattr(profile, "allow_news_trading", False) or False)
+    raw_window = getattr(profile, "news_blackout_minutes", 2)
+    news_window = int(raw_window) if raw_window is not None else 2
+    allow_weekend = bool(getattr(profile, "allow_weekend_holding", False) or False)
+    raw_risk = getattr(profile, "max_open_risk_pct", 3.0)
+    max_open_risk = float(raw_risk) if raw_risk is not None else 3.0
+    max_lot_limit = getattr(profile, "max_lot_per_trade", None)
+
+    # 1. Calculate Risk in USD canonically
     pip_val = resolve_pip_value(trade.pair, trade.lot_size, live_rates)
     risk_amount_usd = round(pip_val * trade.stop_loss_pips, 2)
 
     starting_bal = float(account.starting_balance)
     risk_pct = round((risk_amount_usd / starting_bal) * 100.0, 2) if starting_bal > 0 else 0.0
 
+    # 2. Daily Loss Check
     daily_limit_usd = float(account.daily_drawdown_limit_usd)
     current_daily_loss = float(account.current_daily_loss_usd)
     remaining_daily_usd = max(0.0, daily_limit_usd - current_daily_loss)
     projected_daily_loss = current_daily_loss + risk_amount_usd
-    projected_daily_pct = round((projected_daily_loss / starting_bal) * 100.0, 2) if starting_bal > 0 else 0.0
+    projected_daily_loss_pct = round((projected_daily_loss / starting_bal) * 100.0, 2) if starting_bal > 0 else 0.0
 
     if risk_amount_usd > remaining_daily_usd:
         violations.append("EXCEEDS_DAILY_LOSS_LIMIT")
 
+    # 3. Total Max Drawdown Check
     total_limit_usd = float(account.total_drawdown_limit_usd)
     current_total_loss = float(account.current_total_loss_usd)
     remaining_total_usd = max(0.0, total_limit_usd - current_total_loss)
     projected_total_loss = current_total_loss + risk_amount_usd
-    projected_total_pct = round((projected_total_loss / starting_bal) * 100.0, 2) if starting_bal > 0 else 0.0
+    projected_total_loss_pct = round((projected_total_loss / starting_bal) * 100.0, 2) if starting_bal > 0 else 0.0
 
     if risk_amount_usd > remaining_total_usd:
         violations.append("EXCEEDS_MAX_DRAWDOWN_LIMIT")
 
-    blackout_res = check_news_blackout(news_items, blackout_window_minutes=2)
+    # 4. News Blackout Check (Dynamic from Profile)
+    blackout_res = check_news_blackout(
+        news_items,
+        blackout_window_minutes=news_window,
+        allow_news_trading=allow_news
+    )
     if blackout_res.get("is_blackout"):
         violations.append("NEWS_BLACKOUT_WINDOW_ACTIVE")
         warnings.append(blackout_res.get("reason", "News blackout active"))
 
-    weekend_res = check_weekend_holding_risk(allow_weekend_holding=False)
+    # 5. Weekend Holding Check (Dynamic from Profile)
+    weekend_res = check_weekend_holding_risk(allow_weekend_holding=allow_weekend)
     if weekend_res.get("weekend_breach_risk"):
         warnings.append(weekend_res.get("warning", "Weekend holding risk"))
 
-    if risk_pct > 2.0:
-        warnings.append("HIGH_TRADE_RISK_PERCENTAGE")
+    # 6. Max Lot Per Trade Rule (Dynamic from Profile)
+    if max_lot_limit is not None and trade.lot_size > float(max_lot_limit):
+        violations.append(f"EXCEEDS_PROFILE_MAX_LOT_LIMIT ({max_lot_limit} lots)")
+
+    # 7. Warnings for high risk based on profile threshold
+    if risk_pct > max_open_risk:
+        warnings.append(f"HIGH_TRADE_RISK_PERCENTAGE (Exceeds {max_open_risk}%)")
     if safe_divide(projected_daily_loss, daily_limit_usd) > 75.0:
         warnings.append("DAILY_LOSS_BUFFER_NEARLY_EXHAUSTED")
 
+    # 8. Max Allowed Lot Size calculation canonically
     max_tolerable_usd = min(remaining_daily_usd, remaining_total_usd)
     pip_val_1_lot = resolve_pip_value(trade.pair, 1.0, live_rates)
     max_lot_size = round(max_tolerable_usd / (trade.stop_loss_pips * pip_val_1_lot), 2) if (trade.stop_loss_pips * pip_val_1_lot) > 0 else 0.0
+    if max_lot_limit is not None:
+        max_lot_size = min(max_lot_size, float(max_lot_limit))
     max_lot_size = max(0.0, max_lot_size)
 
     allowed = len(violations) == 0
@@ -94,8 +116,8 @@ def evaluate_trade_risk(
         allowed=allowed,
         risk_amount_usd=risk_amount_usd,
         risk_pct=risk_pct,
-        projected_daily_loss_pct=projected_daily_pct,
-        projected_total_loss_pct=projected_total_pct,
+        projected_daily_loss_pct=projected_daily_loss_pct,
+        projected_total_loss_pct=projected_total_loss_pct,
         max_allowed_lot_size=max_lot_size,
         violations=violations,
         warnings=warnings

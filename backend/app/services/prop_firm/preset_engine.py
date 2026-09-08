@@ -1,11 +1,14 @@
+﻿"""
+Unified Institutional Prop Firm Compliance Engine.
+Evaluates static, relative, and trailing drawdowns, news blackout rules,
+weekend holding constraints, and max risk boundaries.
 """
-Institutional Prop Firm Preset Registry and News Blackout Engine.
-Provides strict rule configurations for FTMO, The5ers, FundedNext, and Alpha Capital,
-plus red-folder macroeconomic event blackout evaluations.
-"""
+
+from __future__ import annotations
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+
 
 PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
     "ftmo_normal": {
@@ -20,6 +23,7 @@ PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
         "allow_news_trading": False,
         "news_blackout_minutes": 2,
         "max_open_risk_pct": 3.0,
+        "max_lot_per_trade": None,
     },
     "ftmo_swing": {
         "id": "ftmo_swing",
@@ -33,6 +37,7 @@ PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
         "allow_news_trading": True,
         "news_blackout_minutes": 0,
         "max_open_risk_pct": 5.0,
+        "max_lot_per_trade": None,
     },
     "the5ers_high_stakes": {
         "id": "the5ers_high_stakes",
@@ -46,6 +51,7 @@ PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
         "allow_news_trading": True,
         "news_blackout_minutes": 0,
         "max_open_risk_pct": 4.0,
+        "max_lot_per_trade": None,
     },
     "fundednext_stellar": {
         "id": "fundednext_stellar",
@@ -59,6 +65,7 @@ PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
         "allow_news_trading": False,
         "news_blackout_minutes": 2,
         "max_open_risk_pct": 3.5,
+        "max_lot_per_trade": None,
     },
     "alpha_capital": {
         "id": "alpha_capital",
@@ -72,6 +79,7 @@ PROP_FIRM_PRESETS: Dict[str, Dict[str, Any]] = {
         "allow_news_trading": False,
         "news_blackout_minutes": 5,
         "max_open_risk_pct": 2.5,
+        "max_lot_per_trade": 50.0,
     }
 }
 
@@ -82,14 +90,16 @@ def get_preset_profile(preset_id: str) -> Dict[str, Any]:
 
 def check_news_blackout(
     news_items: Optional[List[Dict[str, Any]]],
-    blackout_window_minutes: int = 5,
+    blackout_window_minutes: Optional[int] = 2,
+    allow_news_trading: bool = False,
     current_time: Optional[datetime] = None
 ) -> Dict[str, Any]:
     """
     Checks if current time is within high-impact news blackout window.
-    Returns blackout status and blocking reasons.
+    If allow_news_trading is True or blackout window <= 0, blackout is bypassed.
     """
-    if not news_items or blackout_window_minutes <= 0:
+    window = blackout_window_minutes if blackout_window_minutes is not None else 2
+    if allow_news_trading or window <= 0 or not news_items:
         return {"is_blackout": False, "reason": None, "active_event": None}
 
     now = current_time or datetime.now(timezone.utc)
@@ -106,10 +116,10 @@ def check_news_blackout(
                     else:
                         pub_time = pub_str
                     diff_mins = abs((now - pub_time).total_seconds()) / 60.0
-                    if diff_mins <= blackout_window_minutes:
+                    if diff_mins <= window:
                         return {
                             "is_blackout": True,
-                            "reason": f"High-Impact news blackout active: '{title}' ({diff_mins:.1f} mins from release, window: ±{blackout_window_minutes}m)",
+                            "reason": f"High-Impact news blackout active: '{title}' ({diff_mins:.1f} mins from release, window: +/-{window}m)",
                             "active_event": title
                         }
                 except Exception:
@@ -126,9 +136,12 @@ def check_weekend_holding_risk(
     Detects Friday market close approaching (>20:00 UTC on Friday)
     for accounts that prohibit weekend holding.
     """
+    if allow_weekend_holding:
+        return {"weekend_breach_risk": False, "warning": None}
+
     now = current_time or datetime.now(timezone.utc)
     # Friday is weekday 4
-    if now.weekday() == 4 and now.hour >= 20 and not allow_weekend_holding:
+    if now.weekday() == 4 and now.hour >= 20:
         return {
             "weekend_breach_risk": True,
             "warning": "Weekend Holding Breach Risk: Friday market close imminent. All open positions must be flat by 21:00 UTC."

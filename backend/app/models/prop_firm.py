@@ -8,12 +8,24 @@ class PropFirmProfile(Base):
 
     id = Column(String(64), primary_key=True, index=True)
     name = Column(String(128), nullable=False)
+    
+    # Core Drawdown Rules
     daily_drawdown_pct = Column(Numeric(5, 2), nullable=False, default=5.0)
     max_drawdown_pct = Column(Numeric(5, 2), nullable=False, default=10.0)
-    drawdown_type = Column(String(32), nullable=False, default="STATIC")
-    max_loss_basis = Column(String(32), nullable=False, default="BALANCE")
-    profit_target_pct = Column(Numeric(5, 2), nullable=True)
+    drawdown_type = Column(String(32), nullable=False, default="STATIC") # STATIC, TRAILING_EQUITY, RELATIVE
+    max_loss_basis = Column(String(32), nullable=False, default="BALANCE") # BALANCE, EQUITY, HIGHER_OF_BOTH
+    
+    # Challenge Targets & Constraints
+    profit_target_pct = Column(Numeric(5, 2), nullable=True, default=8.0)
     min_trading_days = Column(Integer, default=0)
+    
+    # Dynamic Behavioral & Compliance Rules
+    allow_weekend_holding = Column(Boolean, nullable=False, default=False)
+    allow_news_trading = Column(Boolean, nullable=False, default=False)
+    news_blackout_minutes = Column(Integer, nullable=False, default=2)
+    max_open_risk_pct = Column(Numeric(5, 2), nullable=False, default=3.0)
+    max_lot_per_trade = Column(Numeric(6, 2), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     accounts = relationship("AccountState", back_populates="profile", cascade="all, delete-orphan")
@@ -35,7 +47,7 @@ class AccountState(Base):
     status = Column(String(32), nullable=False, default="ACTIVE")
     
     # Real Provider / Connection Verification Columns
-    data_status = Column(String(32), nullable=False, default="UNAVAILABLE") # LIVE, DELAYED, UNAVAILABLE
+    data_status = Column(String(32), nullable=False, default="UNAVAILABLE")
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     is_verified = Column(Boolean, nullable=False, default=False)
     provider_name = Column(String(64), nullable=True, default="MOCK_PROVIDER")

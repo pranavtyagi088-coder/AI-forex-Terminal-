@@ -19,6 +19,11 @@ class PropFirmProfileSchema(CamelModel):
     max_loss_basis: str = "BALANCE"
     profit_target_pct: Optional[float] = 8.0
     min_trading_days: int = 0
+    allow_weekend_holding: bool = False
+    allow_news_trading: bool = False
+    news_blackout_minutes: int = 2
+    max_open_risk_pct: float = 3.0
+    max_lot_per_trade: Optional[float] = None
 
 class AccountStateSchema(CamelModel):
     account_id: str
@@ -33,8 +38,6 @@ class AccountStateSchema(CamelModel):
     current_daily_loss_usd: float = 0.0
     current_total_loss_usd: float = 0.0
     status: str = "ACTIVE"
-    
-    # Provider Adapter Fields
     data_status: str = "UNAVAILABLE"
     last_synced_at: Optional[datetime] = None
     is_verified: bool = False

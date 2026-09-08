@@ -1,8 +1,13 @@
-from typing import List, Dict, Optional
+from datetime import datetime
+from typing import List, Dict, Optional, Any
 import math
 from pydantic import BaseModel, Field
+
 from app.engines.risk.correlation import CorrelationRiskEngine, OpenPositionInput, AggregateRiskResult
 from app.engines.risk.instruments import InstrumentRegistry, InstrumentSpec, AssetClass
+from app.engines.risk.circuit_breaker import CircuitBreakerEngine, BreakerState
+from app.services.broker.adapters import check_account_freshness, DataStatus
+from app.engines.events.bus import event_bus, EventType, EventSeverity
 
 
 class PreFlightTradeRequest(BaseModel):
@@ -18,11 +23,19 @@ class PreFlightTradeRequest(BaseModel):
     
     # State & Context Controls
     circuit_breaker_state: str = "NORMAL"  # NORMAL, WARNING, RESTRICTED, KILL_SWITCH
+    consecutive_losses: int = 0
+    account_health_score: float = 100.0
     current_daily_loss_pct: float = 0.0
     current_total_drawdown_pct: float = 0.0
     max_daily_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0
     
+    # Freshness & Data Quality
+    account_last_synced_at: Optional[datetime] = None
+    require_fresh_account_data: bool = False
+    freshness_threshold_seconds: int = 60
+    
+    # Prop Firm Rules
     is_news_blackout: bool = False
     allow_news_trading: bool = False
     is_weekend_window: bool = False
@@ -46,6 +59,7 @@ class PreFlightTradeResponse(BaseModel):
     rejection_reasons: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     gate_checks: Dict[str, bool] = Field(default_factory=dict)
+    account_data_status: str = "UNKNOWN"
 
 
 class PreFlightGatekeeper:
@@ -53,21 +67,22 @@ class PreFlightGatekeeper:
         self,
         correlation_engine: Optional[CorrelationRiskEngine] = None,
         instrument_registry: Optional[InstrumentRegistry] = None,
+        circuit_breaker: Optional[CircuitBreakerEngine] = None,
     ):
         self.correlation_engine = correlation_engine or CorrelationRiskEngine()
         self.instrument_registry = instrument_registry or InstrumentRegistry()
+        self.circuit_breaker = circuit_breaker or CircuitBreakerEngine()
 
     def _calculate_pip_value(self, spec: InstrumentSpec, entry_price: float, quotes: Dict[str, float]) -> float:
         if spec.asset_class == AssetClass.INDEX:
-            return 1.0  # 1 lot  per point
+            return 1.0
         elif spec.canonical_symbol in ("XAUUSD", "GOLD"):
-            return 10.0  # 100 oz: 0.1 pip =  ( move = )
+            return 10.0
         elif spec.canonical_symbol == "XAGUSD":
-            return 50.0  # 5000 oz: 0.01 pip = 
+            return 50.0
         elif spec.quote_currency == "USD":
-            return 10.0  # Standard lot EURUSD, GBPUSD = /pip
+            return 10.0
         elif spec.base_currency == "USD":
-            # USDJPY, USDCAD, USDCHF
             rate = quotes.get(spec.canonical_symbol, entry_price)
             return (spec.contract_size * spec.pip_unit) / rate
         elif spec.canonical_symbol == "EURGBP":
@@ -81,7 +96,9 @@ class PreFlightGatekeeper:
     def evaluate(self, req: PreFlightTradeRequest) -> PreFlightTradeResponse:
         rejection_reasons: List[str] = []
         warnings: List[str] = []
+        data_status_str = "LIVE"
         gate_checks = {
+            "account_freshness": True,
             "instrument_supported": True,
             "spread_guard": True,
             "circuit_breaker": True,
@@ -91,7 +108,20 @@ class PreFlightGatekeeper:
             "portfolio_correlation": True,
         }
 
-        # 0. Gate: Instrument Validation & Spec Retrieval
+        # 0. Gate: Account Freshness Check
+        if req.account_last_synced_at is not None:
+            data_status, freshness_reason = check_account_freshness(
+                req.account_last_synced_at,
+                threshold_seconds=req.freshness_threshold_seconds,
+            )
+            data_status_str = data_status.value
+            if data_status in (DataStatus.UNAVAILABLE, DataStatus.DELAYED) and req.require_fresh_account_data:
+                rejection_reasons.append(f"STALE_ACCOUNT_DATA: {freshness_reason}")
+                gate_checks["account_freshness"] = False
+            elif data_status == DataStatus.DELAYED:
+                warnings.append(f"DELAYED_ACCOUNT_DATA: {freshness_reason}")
+
+        # 1. Gate: Instrument Validation & Spec Retrieval
         try:
             canonical_sym = self.instrument_registry.normalize_symbol(req.symbol)
             spec = self.instrument_registry.get_spec(req.symbol)
@@ -108,9 +138,10 @@ class PreFlightGatekeeper:
                 rejection_reasons=rejection_reasons,
                 warnings=warnings,
                 gate_checks=gate_checks,
+                account_data_status=data_status_str,
             )
 
-        # 1. Gate: Spread Guard
+        # 2. Gate: Spread Guard
         if req.current_spread_pips is not None:
             if req.current_spread_pips > spec.max_allowed_spread_pips:
                 rejection_reasons.append(
@@ -118,14 +149,25 @@ class PreFlightGatekeeper:
                 )
                 gate_checks["spread_guard"] = False
 
-        # 2. Gate: Circuit Breaker
+        # 3. Gate: Server-Side Continuous Circuit Breaker
+        server_breaker_snap = self.circuit_breaker.evaluate(
+            daily_loss_pct=req.current_daily_loss_pct,
+            total_dd_pct=req.current_total_drawdown_pct,
+            consecutive_losses=req.consecutive_losses,
+            health_score=req.account_health_score,
+        )
+
+        effective_breaker_state = server_breaker_snap.state.value
         if req.circuit_breaker_state == "KILL_SWITCH":
-            rejection_reasons.append("Circuit Breaker KILL_SWITCH is active. Trading halted.")
+            effective_breaker_state = "KILL_SWITCH"
+
+        if effective_breaker_state == "KILL_SWITCH":
+            rejection_reasons.append(f"Circuit Breaker KILL_SWITCH is active ({server_breaker_snap.reason or 'Halted'}).")
             gate_checks["circuit_breaker"] = False
-        elif req.circuit_breaker_state == "RESTRICTED":
+        elif effective_breaker_state == "RESTRICTED":
             warnings.append("Circuit Breaker RESTRICTED mode active. Reduce risk.")
 
-        # 3. Gate: Prop Firm Drawdown Limits
+        # 4. Gate: Prop Firm Drawdown Limits
         if req.current_daily_loss_pct >= req.max_daily_loss_pct:
             rejection_reasons.append(
                 f"Daily drawdown limit reached ({req.current_daily_loss_pct:.2f}% >= {req.max_daily_loss_pct:.2f}%)."
@@ -138,7 +180,7 @@ class PreFlightGatekeeper:
             )
             gate_checks["prop_firm_drawdown"] = False
 
-        # 4. Gate: News & Calendar Restrictions
+        # 5. Gate: News & Calendar Restrictions
         if req.is_news_blackout and not req.allow_news_trading:
             rejection_reasons.append("High-impact news blackout window is active for this prop firm challenge.")
             gate_checks["news_and_calendar"] = False
@@ -146,7 +188,7 @@ class PreFlightGatekeeper:
         if req.is_weekend_window and not req.allow_weekend_holding:
             warnings.append("Weekend rollover approaching. Firm mandates closing before weekend.")
 
-        # 5. Gate: Stop Loss Geometry & Pip Sizing
+        # 6. Gate: Stop Loss Geometry & Pip Sizing
         pip_unit = spec.pip_unit
         price_diff = req.entry_price - req.stop_loss if req.direction == "BUY" else req.stop_loss - req.entry_price
         if price_diff <= 0:
@@ -184,7 +226,7 @@ class PreFlightGatekeeper:
             approved_lot = max(min_l, min(stepped_lot, max_l))
             approved_lot = round(approved_lot, 2)
 
-        # 6. Gate: Portfolio & Cluster Correlation
+        # 7. Gate: Portfolio & Cluster Correlation
         corr_result: AggregateRiskResult = self.correlation_engine.evaluate_aggregate_risk(
             account_balance=req.account_balance,
             open_positions=req.open_positions,
@@ -202,6 +244,17 @@ class PreFlightGatekeeper:
 
         allowed = len(rejection_reasons) == 0 and approved_lot > 0
 
+        # 8. EventBus Telemetry Emission
+        if not allowed:
+            event_bus.publish(
+                event_type=EventType.NO_TRADE_DECISION,
+                severity=EventSeverity.WARNING,
+                source_module="PreFlightGatekeeper",
+                symbol=canonical_sym,
+                message=f"Pre-flight trade vetoed for {canonical_sym}: {'; '.join(rejection_reasons)}",
+                payload={"reasons": rejection_reasons, "gate_checks": gate_checks},
+            )
+
         return PreFlightTradeResponse(
             allowed=allowed,
             canonical_symbol=canonical_sym,
@@ -213,4 +266,5 @@ class PreFlightGatekeeper:
             rejection_reasons=rejection_reasons,
             warnings=warnings,
             gate_checks=gate_checks,
+            account_data_status=data_status_str,
         )

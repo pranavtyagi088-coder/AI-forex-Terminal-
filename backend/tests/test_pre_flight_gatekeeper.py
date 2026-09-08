@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from app.main import app
 from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest
@@ -11,7 +12,7 @@ class TestPreFlightGatekeeper:
     def test_pre_flight_approved_clean_trade(self):
         engine = PreFlightGatekeeper()
         req = PreFlightTradeRequest(
-            symbol="EURUSD.pro",  # Raw broker symbol
+            symbol="EURUSD.pro",
             direction="BUY",
             entry_price=1.1000,
             stop_loss=1.0950,
@@ -27,6 +28,24 @@ class TestPreFlightGatekeeper:
         assert res.reward_risk_ratio == 2.0
         assert len(res.rejection_reasons) == 0
         assert res.gate_checks["instrument_supported"] is True
+
+    def test_pre_flight_freshness_gate_blocks_stale_account(self):
+        engine = PreFlightGatekeeper()
+        stale_time = datetime.now(timezone.utc) - timedelta(seconds=180)  # 3 minutes stale
+        req = PreFlightTradeRequest(
+            symbol="EURUSD",
+            direction="BUY",
+            entry_price=1.1000,
+            stop_loss=1.0950,
+            account_balance=100000.0,
+            account_last_synced_at=stale_time,
+            require_fresh_account_data=True,
+            freshness_threshold_seconds=60,
+        )
+        res = engine.evaluate(req)
+        assert res.allowed is False
+        assert any("STALE_ACCOUNT_DATA" in r for r in res.rejection_reasons)
+        assert res.gate_checks["account_freshness"] is False
 
     def test_pre_flight_spread_guard_rejection(self):
         engine = PreFlightGatekeeper()

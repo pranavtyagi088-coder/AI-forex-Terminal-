@@ -1,14 +1,7 @@
-"""
-Paper Trading Execution Engine.
-"""
-
-from __future__ import annotations
-
+﻿from dataclasses import dataclass
 from datetime import datetime, timezone
-from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.trade import Trade
 from app.models.instrument import Instrument
 from app.engines.risk.calculator import calculate_pip_value_usd
@@ -25,6 +18,7 @@ class TradeOrderRequest:
     take_profit: float | None = None
     slippage_pips: float = 0.5
     commission_per_lot: float = 7.0
+    strategy_id: int | None = None
 
 
 async def execute_paper_order(
@@ -38,28 +32,32 @@ async def execute_paper_order(
     result = await db.execute(select(Instrument).where(Instrument.symbol == order.symbol))
     inst = result.scalar_one_or_none()
     if not inst:
-        raise ValueError(f"Instrument {order.symbol} not found in database")
+        raise ValueError(f"Instrument {order.symbol} not found")
 
     pip_size = float(inst.pip_size)
-    slippage_offset = order.slippage_pips * pip_size
-    if order.direction == "BUY":
-        entry_fill = order.entry_price + slippage_offset
-    else:
-        entry_fill = order.entry_price - slippage_offset
 
-    total_commission = order.position_size_lots * order.commission_per_lot
+    # Slippage applied
+    if order.direction == "BUY":
+        entry_fill = order.entry_price + (order.slippage_pips * pip_size)
+    else:
+        entry_fill = order.entry_price - (order.slippage_pips * pip_size)
+
+    commission = round(order.position_size_lots * order.commission_per_lot, 2)
 
     trade = Trade(
         analysis_id=order.analysis_id,
-        broker="paper",
-        opened_at=datetime.now(timezone.utc),
+        strategy_id=order.strategy_id,
+        broker="PAPER",
+        symbol=order.symbol,
+        direction=order.direction,
         position_size_lots=order.position_size_lots,
         entry_fill=entry_fill,
-        exit_fill=None,
-        pnl=None,
-        slippage=order.slippage_pips,
-        commission=total_commission,
+        stop_loss=order.stop_loss,
+        take_profit=order.take_profit,
+        commission=commission,
         status="OPEN",
+        pnl=0.0,
+        opened_at=datetime.now(timezone.utc),
     )
     db.add(trade)
     await db.commit()

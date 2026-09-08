@@ -33,6 +33,9 @@ class PreFlightTradeRequest(BaseModel):
     max_daily_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0
     
+    # Strategy Lifecycle Controls (P1-#28)
+    strategy_lifecycle_status: str = "ACTIVE"  # ACTIVE, CAUTION, DEGRADED, RETIRED, SUSPENDED
+    
     # Freshness & Data Quality
     account_last_synced_at: Optional[datetime] = None
     require_fresh_account_data: bool = False
@@ -131,6 +134,7 @@ class PreFlightGatekeeper:
             "circuit_breaker": True,
             "prop_firm_drawdown": True,
             "news_and_calendar": True,
+            "strategy_health": True,
             "stop_loss_geometry": True,
             "portfolio_correlation": True,
         }
@@ -230,7 +234,22 @@ class PreFlightGatekeeper:
             if req.is_weekend_window and not req.allow_weekend_holding:
                 warnings.append("Weekend rollover approaching. Firm mandates closing before weekend.")
 
-            # ── 6. Gate: Stop Loss Geometry & Pip Sizing ──
+            # ── 6. Gate: Strategy Lifecycle Health Check (P1-#28) ──
+            strat_status = req.strategy_lifecycle_status.upper()
+            lot_multiplier = 1.0
+
+            if strat_status in ("RETIRED", "SUSPENDED"):
+                rejection_reasons.append(
+                    f"STRATEGY_DECAY_VETO: Strategy status is '{strat_status}'. Execution prohibited."
+                )
+                gate_checks["strategy_health"] = False
+            elif strat_status == "DEGRADED":
+                lot_multiplier = 0.5
+                warnings.append("STRATEGY_DEGRADED: 50% risk decimation penalty applied to lot sizing.")
+            elif strat_status == "CAUTION":
+                warnings.append("STRATEGY_CAUTION: Strategy is under performance surveillance.")
+
+            # ── 7. Gate: Stop Loss Geometry & Pip Sizing ──
             pip_unit = spec.pip_unit
             price_diff = req.entry_price - req.stop_loss if req.direction == "BUY" else req.stop_loss - req.entry_price
             if price_diff <= 0:
@@ -240,9 +259,9 @@ class PreFlightGatekeeper:
                 gate_checks["stop_loss_geometry"] = False
                 pip_distance = 0.0
             else:
-                pip_distance = price_diff / pip_unit
+                pip_distance = (price_diff + 1e-12) / pip_unit
 
-            risk_usd = req.account_balance * (req.risk_per_trade_pct / 100.0)
+            risk_usd = req.account_balance * (req.risk_per_trade_pct / 100.0) * lot_multiplier
 
             # Risk-to-reward ratio calculation
             rr_ratio: Optional[float] = None
@@ -264,19 +283,18 @@ class PreFlightGatekeeper:
             if pip_distance > 0:
                 pip_val = self._calculate_pip_value(spec, req.entry_price, req.quotes)
                 raw_lot = risk_usd / (pip_distance * pip_val)
-                # Precision guard: round to 7 decimals before floor quantization to neutralize binary float imprecision
                 stepped_lot = math.floor(round(raw_lot / step_l, 7)) * step_l
                 approved_lot = max(min_l, min(stepped_lot, max_l))
                 approved_lot = round(approved_lot, 2)
 
-            # ── 7. Gate: Portfolio & Cluster Correlation ──
+            # ── 8. Gate: Portfolio & Cluster Correlation ──
             corr_result: AggregateRiskResult = self.correlation_engine.evaluate_aggregate_risk(
                 account_balance=req.account_balance,
                 open_positions=req.open_positions,
                 proposed_symbol=canonical_sym,
                 proposed_direction=req.direction,
                 proposed_risk_usd=risk_usd,
-                proposed_risk_pct=req.risk_per_trade_pct,
+                proposed_risk_pct=req.risk_per_trade_pct * lot_multiplier,
             )
 
             if not corr_result.allowed:
@@ -287,7 +305,7 @@ class PreFlightGatekeeper:
 
             allowed = len(rejection_reasons) == 0 and approved_lot > 0
 
-            # ── 8. EventBus Telemetry Emission ──
+            # ── 9. EventBus Telemetry Emission ──
             if not allowed:
                 event_bus.publish(
                     event_type=EventType.NO_TRADE_DECISION,
@@ -303,7 +321,7 @@ class PreFlightGatekeeper:
                 canonical_symbol=canonical_sym,
                 approved_lot_size=approved_lot if allowed else 0.0,
                 risk_amount_usd=risk_usd,
-                risk_pct=req.risk_per_trade_pct,
+                risk_pct=round(req.risk_per_trade_pct * lot_multiplier, 2),
                 pip_risk=round(pip_distance, 1),
                 reward_risk_ratio=rr_ratio,
                 rejection_reasons=rejection_reasons,

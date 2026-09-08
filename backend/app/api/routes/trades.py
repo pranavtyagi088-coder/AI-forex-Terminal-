@@ -1,4 +1,4 @@
-"""API routes for managing live, paper trades, staging proposals, and pre-flight risk checks."""
+﻿"""API routes for managing live, paper trades, staging proposals, and pre-flight risk checks."""
 
 from __future__ import annotations
 
@@ -7,16 +7,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from app.core.auth import verify_api_token
 from app.core.database import get_db
 from app.models.trade import Trade
+from app.models.strategy import Strategy
 from app.services.broker.paper import TradeOrderRequest, close_paper_trade, execute_paper_order
 from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest, PreFlightTradeResponse
 from app.engines.execution.staging import OrderStagingManager, StagedProposal, ProposalStatus
 from app.engines.analytics.outcome import OutcomeAnalyzer, ExitReasonEnum, TradeOutcome
-from app.engines.strategy.decay_detector import DecayDetector
+from app.engines.strategy.decay_detector import DecayDetector, StrategyMetrics
+from app.engines.events.bus import event_bus, EventType, EventSeverity
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 gatekeeper = PreFlightGatekeeper()
@@ -34,10 +36,12 @@ class StageOrderPayload(BaseModel):
 class ApproveProposalPayload(BaseModel):
     current_market_price: float
     analysis_id: Optional[int] = None
+    strategy_id: Optional[int] = None
 
 
 class OpenTradePayload(BaseModel):
     analysis_id: int | None = None
+    strategy_id: int | None = None
     symbol: str
     direction: str
     position_size_lots: float
@@ -55,7 +59,7 @@ class CloseTradePayload(BaseModel):
     exit_reason: ExitReasonEnum = ExitReasonEnum.MANUAL_CLOSE
     highest_price_reached: Optional[float] = None
     lowest_price_reached: Optional[float] = None
-    strategy_name: Optional[str] = None
+    strategy_id: Optional[int] = None
 
 
 @router.post("/pre-flight-check", response_model=PreFlightTradeResponse)
@@ -113,6 +117,7 @@ async def approve_and_execute_proposal(
 
     order = TradeOrderRequest(
         analysis_id=payload.analysis_id,
+        strategy_id=payload.strategy_id,
         symbol=approved.symbol,
         direction=approved.direction,
         position_size_lots=approved.position_size_lots,
@@ -153,6 +158,7 @@ async def execute_trade(
     """Direct paper order execution endpoint."""
     order = TradeOrderRequest(
         analysis_id=req.analysis_id,
+        strategy_id=req.strategy_id,
         symbol=req.symbol,
         direction=req.direction,
         position_size_lots=req.position_size_lots,
@@ -183,7 +189,7 @@ async def close_trade(
     db: AsyncSession = Depends(get_db),
     _token: str = Depends(verify_api_token),
 ):
-    """Close an open trade and run outcome analytics + strategy decay sync."""
+    """Close an open trade, calculate institutional outcome metrics, and sync strategy decay."""
     try:
         trade = await close_paper_trade(
             db=db,
@@ -212,6 +218,64 @@ async def close_trade(
             lowest_price_reached=req.lowest_price_reached,
         )
 
+        # Persist Realized R-Multiple back to Trade Model
+        trade.realized_r = outcome.realized_r_multiple
+        await db.commit()
+
+        # 2. Strategy Lifecycle Decay Sync (P1-#28)
+        strategy_metrics_payload: Optional[Dict[str, Any]] = None
+        target_strategy_id = req.strategy_id or trade.strategy_id
+
+        if target_strategy_id is not None:
+            strat_res = await db.execute(select(Strategy).where(Strategy.id == target_strategy_id))
+            strat = strat_res.scalar_one_or_none()
+
+            if strat:
+                # Fetch all closed trades for this strategy
+                trades_res = await db.execute(
+                    select(Trade).where(Trade.strategy_id == target_strategy_id, Trade.status == "CLOSED")
+                )
+                strategy_trades = list(trades_res.scalars().all())
+
+                # Compute rolling decay metrics
+                old_status = strat.lifecycle_status
+                metrics: StrategyMetrics = decay_detector.compute_metrics(
+                    trades=strategy_trades,
+                    current_lifecycle=old_status,
+                )
+
+                # Persist updated status if changed
+                if metrics.lifecycle_status != old_status:
+                    strat.lifecycle_status = metrics.lifecycle_status
+                    await db.commit()
+
+                    event_bus.publish(
+                        event_type=EventType.STRATEGY_DECAY_CHANGE,
+                        severity=EventSeverity.WARNING if metrics.lifecycle_status != "ACTIVE" else EventSeverity.INFO,
+                        source_module="StrategyDecayDetector",
+                        symbol=req.symbol,
+                        message=f"Strategy '{strat.name}' (ID: {strat.id}) lifecycle shifted: {old_status} -> {metrics.lifecycle_status}",
+                        payload={
+                            "strategy_id": strat.id,
+                            "old_status": old_status,
+                            "new_status": metrics.lifecycle_status,
+                            "win_rate": metrics.win_rate,
+                            "avg_r": metrics.avg_realized_r,
+                            "warnings": metrics.decay_warnings,
+                        },
+                    )
+
+                strategy_metrics_payload = {
+                    "strategy_id": strat.id,
+                    "strategy_name": strat.name,
+                    "lifecycle_status": strat.lifecycle_status,
+                    "win_rate": metrics.win_rate,
+                    "avg_realized_r": metrics.avg_realized_r,
+                    "profit_factor": metrics.profit_factor,
+                    "consecutive_losses": metrics.consecutive_losses,
+                    "decay_warnings": metrics.decay_warnings,
+                }
+
         return {
             "status": "success",
             "trade_id": trade.id,
@@ -227,6 +291,7 @@ async def close_trade(
                 "exit_reason": outcome.exit_reason.value,
                 "deviation_flags": outcome.deviation_flags,
             },
+            "strategy_intelligence": strategy_metrics_payload,
         }
     except Exception as e:
         raise HTTPException(422, str(e))

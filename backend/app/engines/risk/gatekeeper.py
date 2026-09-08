@@ -121,10 +121,6 @@ class PreFlightGatekeeper:
         return None
 
     def evaluate(self, req: PreFlightTradeRequest) -> PreFlightTradeResponse:
-        """
-        Master deterministic pre-flight evaluation.
-        Fail-Closed: Any unhandled exception or data uncertainty forces allowed=False.
-        """
         rejection_reasons: List[str] = []
         warnings: List[str] = []
         data_status_str = "LIVE"
@@ -268,7 +264,8 @@ class PreFlightGatekeeper:
             if pip_distance > 0:
                 pip_val = self._calculate_pip_value(spec, req.entry_price, req.quotes)
                 raw_lot = risk_usd / (pip_distance * pip_val)
-                stepped_lot = math.floor(raw_lot / step_l) * step_l
+                # Precision guard: round to 7 decimals before floor quantization to neutralize binary float imprecision
+                stepped_lot = math.floor(round(raw_lot / step_l, 7)) * step_l
                 approved_lot = max(min_l, min(stepped_lot, max_l))
                 approved_lot = round(approved_lot, 2)
 
@@ -316,16 +313,13 @@ class PreFlightGatekeeper:
             )
 
         except Exception as unhandled_exc:
-            # ── MASTER FAIL-CLOSED SAFETY SHELL ──
             error_msg = f"SYSTEM_ERROR_FAIL_CLOSED: {type(unhandled_exc).__name__}: {str(unhandled_exc)}"
             logger.error("Unhandled exception during gatekeeper evaluation — enforcing FAIL-CLOSED veto.", exc_info=True)
             rejection_reasons.append(error_msg)
             
-            # Mark all unverified gates as failed
             for g in gate_checks:
                 gate_checks[g] = False
 
-            # Publish emergency telemetry to bus
             event_bus.publish(
                 event_type=EventType.SYSTEM_ALERT,
                 severity=EventSeverity.CRITICAL,
@@ -357,7 +351,6 @@ class PreFlightGatekeeper:
         gate_checks: Dict[str, bool],
         account_data_status: str,
     ) -> PreFlightTradeResponse:
-        """Helper to create standard deterministic fail-closed response."""
         event_bus.publish(
             event_type=EventType.NO_TRADE_DECISION,
             severity=EventSeverity.CRITICAL,

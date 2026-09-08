@@ -24,6 +24,8 @@ class BacktestTrade:
     exit_reason: str
     position_size_lots: float = 0.1
     decision_id: Optional[str] = None
+    spread_paid_pips: float = 0.0
+    was_news_trade: bool = False
 
 
 @dataclass
@@ -49,6 +51,7 @@ class BacktestResult:
     initial_capital: float = 10000.0
     vetoed_signals_count: int = 0
     veto_reasons_summary: Dict[str, int] = field(default_factory=dict)
+    total_slippage_pips_incurred: float = 0.0
 
     def __contains__(self, key: str) -> bool:
         return key in ("metrics", "equity_curve", "trades", "drawdown_curve")
@@ -110,12 +113,6 @@ def generate_synthetic_ohlcv(
 
 
 class DeterministicBacktestEngine:
-    """
-    Same-Code-Path Backtester (P1-#21)
-    Runs identical pre-flight risk gatekeeper, instrument specs, and sizing logic
-    as the live trading execution engine to guarantee zero backtest-to-live divergence.
-    """
-
     def __init__(
         self,
         initial_capital: float = 10000.0,
@@ -129,7 +126,7 @@ class DeterministicBacktestEngine:
         registry: Optional[InstrumentRegistry] = None,
         **kwargs,
     ):
-        self.initial_capital = initial_balance if initial_balance is not None else initial_capital
+        self.initial_capital = float(initial_balance if initial_balance is not None else initial_capital)
         current_risk = risk_percent if risk_percent is not None else risk_per_trade
         self.risk_pct = float(current_risk)
         self.risk_per_trade = self.risk_pct / 100.0
@@ -147,9 +144,19 @@ class DeterministicBacktestEngine:
 
         self.gatekeeper = gatekeeper or PreFlightGatekeeper(instrument_registry=self.registry)
 
-    def _apply_slippage(self, price: float, direction: str, is_entry: bool) -> float:
+    def _calculate_variable_spread(self, base_spread: float, volume: float, max_volume: float) -> float:
+        if max_volume <= 0:
+            return base_spread
+        volume_ratio = volume / max_volume
+        if volume_ratio < 0.15:
+            return base_spread * 3.5
+        elif volume_ratio > 0.85:
+            return base_spread * 2.0
+        return base_spread
+
+    def _apply_slippage(self, price: float, direction: str, is_entry: bool, multiplier: float = 1.0) -> float:
         pip = self.spec.pip_unit
-        slip = self.slippage_pips * pip
+        slip = self.slippage_pips * pip * multiplier
         if direction in ("LONG", "BUY"):
             return price + slip if is_entry else price - slip
         else:
@@ -162,16 +169,19 @@ class DeterministicBacktestEngine:
         self,
         df: pd.DataFrame,
         strategy_id: str = "trend_continuation",
+        allow_news_trading: bool = False,
     ) -> BacktestResult:
-        if len(df) < 50:
-            raise ValueError(f"Minimum 50 bars required, got {len(df)}")
+        if len(df) < 20:
+            raise ValueError(f"Minimum 20 bars required, got {len(df)}")
 
         closes = df["close"].values
         highs = df["high"].values
         lows = df["low"].values
+        volumes = df["volume"].values if "volume" in df.columns else np.ones(len(closes)) * 1000.0
+        max_vol = float(np.max(volumes)) if len(volumes) > 0 else 1000.0
         n = len(closes)
 
-        equity = self.initial_capital
+        equity = float(self.initial_capital)
         equity_curve = [equity]
         drawdown_curve = [0.0]
         peak_equity = equity
@@ -185,12 +195,14 @@ class DeterministicBacktestEngine:
         take_profit = 0.0
         position_size_lots = 0.0
         active_decision_id: Optional[str] = None
+        was_news_trade = False
 
         vetoed_signals_count = 0
         veto_reasons_summary: Dict[str, int] = {}
         consecutive_losses = 0
+        total_slippage_incurred = 0.0
 
-        atr_period = 14
+        atr_period = min(14, max(2, n // 3))
         atr_values = np.zeros(n)
         for i in range(atr_period, n):
             tr_sum = 0.0
@@ -203,20 +215,32 @@ class DeterministicBacktestEngine:
                 tr_sum += tr
             atr_values[i] = tr_sum / atr_period
 
-        for i in range(atr_period + 1, n):
-            atr = atr_values[i]
-            if atr <= 0:
-                equity_curve.append(equity)
-                dd = (peak_equity - equity) / peak_equity * 100 if peak_equity > 0 else 0
-                drawdown_curve.append(round(dd, 2))
-                continue
+        start_bar = min(atr_period + 1, n - 1)
+        for i in range(start_bar, n):
+            atr = atr_values[i] if atr_values[i] > 0 else (closes[i] * 0.001)
+
+            is_news_hour = False
+            if "timestamp" in df.columns:
+                try:
+                    hour = pd.to_datetime(df["timestamp"].values[i]).hour
+                    is_news_hour = hour in (13, 14, 15)
+                except Exception:
+                    is_news_hour = False
+
+            base_spec_spread = self.spec.max_allowed_spread_pips * 0.4
+            current_spread = self._calculate_variable_spread(base_spec_spread, volumes[i], max_vol)
+            
+            slip_multiplier = 1.0
+            if is_news_hour:
+                current_spread *= 4.0
+                slip_multiplier = 3.0
 
             if not in_position:
                 signal = self._generate_signal(closes, highs, lows, i, atr, strategy_id)
                 if signal != "NONE":
                     direction = "BUY" if signal == "LONG" else "SELL"
                     raw_entry = closes[i]
-                    proposed_entry = self._apply_slippage(raw_entry, direction, is_entry=True)
+                    proposed_entry = self._apply_slippage(raw_entry, direction, is_entry=True, multiplier=slip_multiplier)
 
                     sl_distance = atr * 1.5
                     tp_distance = atr * 2.5
@@ -228,7 +252,6 @@ class DeterministicBacktestEngine:
                         stop_loss = proposed_entry + sl_distance
                         take_profit = proposed_entry - tp_distance
 
-                    # ── SAME-CODE-PATH GATEKEEPER VALIDATION ──
                     current_dd_pct = max(0.0, (peak_equity - equity) / peak_equity * 100) if peak_equity > 0 else 0.0
                     gate_req = PreFlightTradeRequest(
                         symbol=self.canonical_symbol,
@@ -240,6 +263,9 @@ class DeterministicBacktestEngine:
                         risk_per_trade_pct=self.risk_pct,
                         consecutive_losses=consecutive_losses,
                         current_total_drawdown_pct=current_dd_pct,
+                        current_spread_pips=current_spread,
+                        is_news_blackout=is_news_hour,
+                        allow_news_trading=allow_news_trading,
                     )
 
                     gate_res: PreFlightTradeResponse = self.gatekeeper.evaluate(gate_req)
@@ -252,6 +278,8 @@ class DeterministicBacktestEngine:
                         entry_price = proposed_entry
                         position_size_lots = gate_res.approved_lot_size
                         active_decision_id = gate_res.decision_id
+                        was_news_trade = is_news_hour
+                        total_slippage_incurred += self.slippage_pips * slip_multiplier
                         entry_bar = i
                         in_position = True
 
@@ -261,17 +289,17 @@ class DeterministicBacktestEngine:
 
                 if direction == "BUY":
                     if lows[i] <= stop_loss:
-                        exit_price = self._apply_slippage(stop_loss, direction, is_entry=False)
+                        exit_price = self._apply_slippage(stop_loss, direction, is_entry=False, multiplier=slip_multiplier)
                         exit_reason = "STOP_LOSS"
                     elif highs[i] >= take_profit:
-                        exit_price = self._apply_slippage(take_profit, direction, is_entry=False)
+                        exit_price = self._apply_slippage(take_profit, direction, is_entry=False, multiplier=slip_multiplier)
                         exit_reason = "TAKE_PROFIT"
                 else:
                     if highs[i] >= stop_loss:
-                        exit_price = self._apply_slippage(stop_loss, direction, is_entry=False)
+                        exit_price = self._apply_slippage(stop_loss, direction, is_entry=False, multiplier=slip_multiplier)
                         exit_reason = "STOP_LOSS"
                     elif lows[i] <= take_profit:
-                        exit_price = self._apply_slippage(take_profit, direction, is_entry=False)
+                        exit_price = self._apply_slippage(take_profit, direction, is_entry=False, multiplier=slip_multiplier)
                         exit_reason = "TAKE_PROFIT"
 
                 if exit_price > 0:
@@ -302,24 +330,27 @@ class DeterministicBacktestEngine:
                         entry_bar=entry_bar,
                         exit_bar=i,
                         direction=direction,
-                        entry_price=round(entry_price, 6),
-                        exit_price=round(exit_price, 6),
-                        pnl=round(pnl, 2),
-                        pnl_pct=round(pnl_pct, 2),
-                        r_multiple=round(r_multiple, 2),
+                        entry_price=round(float(entry_price), 6),
+                        exit_price=round(float(exit_price), 6),
+                        pnl=round(float(pnl), 2),
+                        pnl_pct=round(float(pnl_pct), 2),
+                        r_multiple=round(float(r_multiple), 2),
                         exit_reason=exit_reason,
                         position_size_lots=position_size_lots,
                         decision_id=active_decision_id,
+                        spread_paid_pips=round(float(current_spread), 2),
+                        was_news_trade=was_news_trade,
                     ))
 
+                    total_slippage_incurred += self.slippage_pips * slip_multiplier
                     equity += pnl
                     in_position = False
 
-            equity_curve.append(round(equity, 2))
+            equity_curve.append(round(float(equity), 2))
             if equity > peak_equity:
                 peak_equity = equity
             dd = (peak_equity - equity) / peak_equity * 100 if peak_equity > 0 else 0
-            drawdown_curve.append(round(dd, 2))
+            drawdown_curve.append(round(float(dd), 2))
 
         metrics = self._compute_metrics(trades, equity, n)
 
@@ -331,6 +362,7 @@ class DeterministicBacktestEngine:
             initial_capital=self.initial_capital,
             vetoed_signals_count=vetoed_signals_count,
             veto_reasons_summary=veto_reasons_summary,
+            total_slippage_pips_incurred=round(float(total_slippage_incurred), 1),
         )
 
     def _generate_signal(
@@ -342,16 +374,19 @@ class DeterministicBacktestEngine:
         atr: float,
         strategy_id: str,
     ) -> str:
-        if i < 20:
+        if i < 10:
             return "NONE"
 
-        sma_fast = np.mean(closes[i - 9:i + 1])
-        sma_slow = np.mean(closes[i - 20:i + 1])
+        lookback_fast = min(9, i)
+        lookback_slow = min(20, i)
+        sma_fast = np.mean(closes[i - lookback_fast:i + 1])
+        sma_slow = np.mean(closes[i - lookback_slow:i + 1])
 
         if strategy_id == "mean_reversion":
-            gains = 0
-            losses = 0
-            for j in range(i - 13, i + 1):
+            gains = 0.0
+            losses = 0.0
+            rsi_lookback = min(14, i)
+            for j in range(i - rsi_lookback + 1, i + 1):
                 diff = closes[j] - closes[j - 1]
                 if diff > 0:
                     gains += diff
@@ -442,16 +477,16 @@ class DeterministicBacktestEngine:
             "total_trades": total_trades,
             "winning_trades": winning_trades,
             "losing_trades": losing_trades,
-            "win_rate": round(win_rate, 2),
-            "profit_factor": round(profit_factor, 2),
-            "expectancy_r": round(expectancy_r, 3),
-            "expectancy_usd": round(expectancy_usd, 2),
-            "max_drawdown": round(max_dd, 2),
-            "max_drawdown_pct": round(max_dd_pct, 2),
-            "net_profit": round(net_profit, 2),
-            "net_profit_pct": round(net_profit_pct, 2),
-            "sharpe_ratio": round(sharpe, 3),
-            "avg_rr": round(avg_rr, 2),
+            "win_rate": round(float(win_rate), 2),
+            "profit_factor": round(float(profit_factor), 2),
+            "expectancy_r": round(float(expectancy_r), 3),
+            "expectancy_usd": round(float(expectancy_usd), 2),
+            "max_drawdown": round(float(max_dd), 2),
+            "max_drawdown_pct": round(float(max_dd_pct), 2),
+            "net_profit": round(float(net_profit), 2),
+            "net_profit_pct": round(float(net_profit_pct), 2),
+            "sharpe_ratio": round(float(sharpe), 3),
+            "avg_rr": round(float(avg_rr), 2),
             "consecutive_losses": max_consec,
             "total_bars": total_bars,
         }

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import List, Optional, Dict, Any
@@ -71,6 +71,19 @@ class BacktestMetrics(BaseModel):
     total_bars: int
 
 
+class WalkForwardMetricsSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    wfe_score_pct: float
+    profit_factor_retention_pct: float
+    win_rate_decay_pct: float
+    drawdown_expansion_ratio: float
+    is_overfit_suspect: bool
+    robustness_grade: str
+    verdict_summary: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -84,6 +97,7 @@ class BacktestResponse(BaseModel):
     drawdown_curve: List[float] = Field(default_factory=list)
     is_metrics: Optional[BacktestMetrics] = None
     oos_metrics: Optional[BacktestMetrics] = None
+    walk_forward_metrics: Optional[WalkForwardMetricsSchema] = None
     data_source: str = "synthetic"
     data_quality: Optional[Dict[str, Any]] = None
     slippage_pips_used: float = 0.5
@@ -91,7 +105,7 @@ class BacktestResponse(BaseModel):
 
     # --- Backward Compatibility Response Fields ---
     bars_analyzed: Optional[int] = None
-    notes: Optional[List[str]] = None
+    notes: List[str] = Field(default_factory=lambda: ["Simulation completed successfully."])
     overall_metrics: Optional[BacktestMetrics] = None
     in_sample_metrics: Optional[BacktestMetrics] = None
     out_of_sample_metrics: Optional[BacktestMetrics] = None

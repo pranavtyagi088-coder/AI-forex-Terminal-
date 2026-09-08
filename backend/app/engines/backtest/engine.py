@@ -1,11 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
+
+from app.engines.risk.instruments import InstrumentRegistry, InstrumentSpec, AssetClass
+from app.engines.risk.gatekeeper import PreFlightGatekeeper, PreFlightTradeRequest, PreFlightTradeResponse
 
 
 @dataclass
@@ -19,6 +22,8 @@ class BacktestTrade:
     pnl_pct: float
     r_multiple: float
     exit_reason: str
+    position_size_lots: float = 0.1
+    decision_id: Optional[str] = None
 
 
 @dataclass
@@ -42,6 +47,8 @@ class BacktestResult:
     equity_curve: List[float]
     drawdown_curve: List[float]
     initial_capital: float = 10000.0
+    vetoed_signals_count: int = 0
+    veto_reasons_summary: Dict[str, int] = field(default_factory=dict)
 
     def __contains__(self, key: str) -> bool:
         return key in ("metrics", "equity_curve", "trades", "drawdown_curve")
@@ -103,30 +110,47 @@ def generate_synthetic_ohlcv(
 
 
 class DeterministicBacktestEngine:
+    """
+    Same-Code-Path Backtester (P1-#21)
+    Runs identical pre-flight risk gatekeeper, instrument specs, and sizing logic
+    as the live trading execution engine to guarantee zero backtest-to-live divergence.
+    """
+
     def __init__(
         self,
         initial_capital: float = 10000.0,
         risk_per_trade: float = 1.0,
         slippage_pips: float = 0.5,
         commission_per_lot: float = 7.0,
-        symbol: Optional[str] = None,
+        symbol: str = "EURUSD",
         initial_balance: Optional[float] = None,
         risk_percent: Optional[float] = None,
-        **kwargs
+        gatekeeper: Optional[PreFlightGatekeeper] = None,
+        registry: Optional[InstrumentRegistry] = None,
+        **kwargs,
     ):
         self.initial_capital = initial_balance if initial_balance is not None else initial_capital
         current_risk = risk_percent if risk_percent is not None else risk_per_trade
-        self.risk_per_trade = current_risk / 100.0
-        self.slippage_pips = slippage_pips
-        self.commission_per_lot = commission_per_lot
+        self.risk_pct = float(current_risk)
+        self.risk_per_trade = self.risk_pct / 100.0
+        self.slippage_pips = float(slippage_pips)
+        self.commission_per_lot = float(commission_per_lot)
+        
+        self.registry = registry or InstrumentRegistry()
+        raw_sym = symbol or "EURUSD"
+        try:
+            self.canonical_symbol = self.registry.normalize_symbol(raw_sym)
+            self.spec = self.registry.get_spec(self.canonical_symbol)
+        except Exception:
+            self.canonical_symbol = "EURUSD"
+            self.spec = self.registry.get_spec("EURUSD")
 
-    def _pip_value(self, price: float) -> float:
-        return 0.01 if price > 50 else 0.0001
+        self.gatekeeper = gatekeeper or PreFlightGatekeeper(instrument_registry=self.registry)
 
     def _apply_slippage(self, price: float, direction: str, is_entry: bool) -> float:
-        pip = self._pip_value(price)
+        pip = self.spec.pip_unit
         slip = self.slippage_pips * pip
-        if direction == "LONG":
+        if direction in ("LONG", "BUY"):
             return price + slip if is_entry else price - slip
         else:
             return price - slip if is_entry else price + slip
@@ -160,6 +184,11 @@ class DeterministicBacktestEngine:
         stop_loss = 0.0
         take_profit = 0.0
         position_size_lots = 0.0
+        active_decision_id: Optional[str] = None
+
+        vetoed_signals_count = 0
+        veto_reasons_summary: Dict[str, int] = {}
+        consecutive_losses = 0
 
         atr_period = 14
         atr_values = np.zeros(n)
@@ -185,34 +214,52 @@ class DeterministicBacktestEngine:
             if not in_position:
                 signal = self._generate_signal(closes, highs, lows, i, atr, strategy_id)
                 if signal != "NONE":
-                    direction = signal
+                    direction = "BUY" if signal == "LONG" else "SELL"
                     raw_entry = closes[i]
-                    entry_price = self._apply_slippage(raw_entry, direction, is_entry=True)
+                    proposed_entry = self._apply_slippage(raw_entry, direction, is_entry=True)
 
                     sl_distance = atr * 1.5
                     tp_distance = atr * 2.5
 
-                    if direction == "LONG":
-                        stop_loss = entry_price - sl_distance
-                        take_profit = entry_price + tp_distance
+                    if direction == "BUY":
+                        stop_loss = proposed_entry - sl_distance
+                        take_profit = proposed_entry + tp_distance
                     else:
-                        stop_loss = entry_price + sl_distance
-                        take_profit = entry_price - tp_distance
+                        stop_loss = proposed_entry + sl_distance
+                        take_profit = proposed_entry - tp_distance
 
-                    risk_amount = equity * self.risk_per_trade
-                    pip = self._pip_value(entry_price)
-                    sl_pips = sl_distance / pip if pip > 0 else 1
-                    position_size_lots = risk_amount / (sl_pips * 10) if sl_pips > 0 else 0.01
-                    position_size_lots = max(0.01, min(position_size_lots, 10.0))
+                    # ── SAME-CODE-PATH GATEKEEPER VALIDATION ──
+                    current_dd_pct = max(0.0, (peak_equity - equity) / peak_equity * 100) if peak_equity > 0 else 0.0
+                    gate_req = PreFlightTradeRequest(
+                        symbol=self.canonical_symbol,
+                        direction=direction,
+                        entry_price=proposed_entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        account_balance=equity,
+                        risk_per_trade_pct=self.risk_pct,
+                        consecutive_losses=consecutive_losses,
+                        current_total_drawdown_pct=current_dd_pct,
+                    )
 
-                    entry_bar = i
-                    in_position = True
+                    gate_res: PreFlightTradeResponse = self.gatekeeper.evaluate(gate_req)
+
+                    if not gate_res.allowed:
+                        vetoed_signals_count += 1
+                        for r in gate_res.rejection_reasons:
+                            veto_reasons_summary[r] = veto_reasons_summary.get(r, 0) + 1
+                    else:
+                        entry_price = proposed_entry
+                        position_size_lots = gate_res.approved_lot_size
+                        active_decision_id = gate_res.decision_id
+                        entry_bar = i
+                        in_position = True
 
             else:
                 exit_price = 0.0
                 exit_reason = ""
 
-                if direction == "LONG":
+                if direction == "BUY":
                     if lows[i] <= stop_loss:
                         exit_price = self._apply_slippage(stop_loss, direction, is_entry=False)
                         exit_reason = "STOP_LOSS"
@@ -228,17 +275,28 @@ class DeterministicBacktestEngine:
                         exit_reason = "TAKE_PROFIT"
 
                 if exit_price > 0:
-                    if direction == "LONG":
-                        raw_pnl = (exit_price - entry_price) * position_size_lots * 100000
+                    pip_unit = self.spec.pip_unit
+
+                    if direction == "BUY":
+                        price_diff = exit_price - entry_price
                     else:
-                        raw_pnl = (entry_price - exit_price) * position_size_lots * 100000
+                        price_diff = entry_price - exit_price
+
+                    pip_gain = price_diff / pip_unit
+                    pip_val_usd = self.gatekeeper._calculate_pip_value(self.spec, entry_price, {})
+                    raw_pnl = pip_gain * pip_val_usd * position_size_lots
 
                     commission = self._apply_commission(position_size_lots)
                     pnl = raw_pnl - commission
                     pnl_pct = (pnl / equity) * 100 if equity > 0 else 0
 
                     sl_distance = abs(entry_price - stop_loss)
-                    r_multiple = (pnl / (sl_distance * position_size_lots * 100000)) if sl_distance > 0 else 0
+                    r_multiple = (price_diff / sl_distance) if sl_distance > 0 else 0.0
+
+                    if pnl <= 0:
+                        consecutive_losses += 1
+                    else:
+                        consecutive_losses = 0
 
                     trades.append(BacktestTrade(
                         entry_bar=entry_bar,
@@ -250,6 +308,8 @@ class DeterministicBacktestEngine:
                         pnl_pct=round(pnl_pct, 2),
                         r_multiple=round(r_multiple, 2),
                         exit_reason=exit_reason,
+                        position_size_lots=position_size_lots,
+                        decision_id=active_decision_id,
                     ))
 
                     equity += pnl
@@ -268,7 +328,9 @@ class DeterministicBacktestEngine:
             trades=trades,
             equity_curve=equity_curve,
             drawdown_curve=drawdown_curve,
-            initial_capital=self.initial_capital
+            initial_capital=self.initial_capital,
+            vetoed_signals_count=vetoed_signals_count,
+            veto_reasons_summary=veto_reasons_summary,
         )
 
     def _generate_signal(

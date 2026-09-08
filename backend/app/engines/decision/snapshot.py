@@ -21,13 +21,23 @@ class NoTradeReasonEnum(str, Enum):
     HTF_STRUCTURAL_OPPOSITION = "HTF_STRUCTURAL_OPPOSITION"
     INSUFFICIENT_CONFLUENCE_SCORE = "INSUFFICIENT_CONFLUENCE_SCORE"
     STALE_ACCOUNT_STATE = "STALE_ACCOUNT_STATE"
+    SPREAD_EXCEEDS_MAX = "SPREAD_EXCEEDS_MAX"
+    UNSUPPORTED_INSTRUMENT = "UNSUPPORTED_INSTRUMENT"
     SLIPPAGE_EXCEEDED = "SLIPPAGE_EXCEEDED"
     
-    # ── Fail-Closed & Uncertainty Taxonomy (P0-10) ──
+    # Fail-Closed & Uncertainty Taxonomy (P0-10)
     SYSTEM_ERROR_FAIL_CLOSED = "SYSTEM_ERROR_FAIL_CLOSED"
     DATA_FEED_UNCERTAINTY = "DATA_FEED_UNCERTAINTY"
     CORRUPTED_PAYLOAD_FAIL_CLOSED = "CORRUPTED_PAYLOAD_FAIL_CLOSED"
     BROKER_UNAVAILABLE_FAIL_CLOSED = "BROKER_UNAVAILABLE_FAIL_CLOSED"
+
+
+class FieldProvenance(BaseModel):
+    """Field-level data provenance tracking source and sync timestamp."""
+    field_name: str
+    source: str  # "BROKER_FEED", "USER_OVERRIDE", "REGISTRY_SPEC", "SIMULATED"
+    data_status: str  # "LIVE", "DELAYED", "SIMULATED", "UNAVAILABLE"
+    synced_at_ts: float = Field(default_factory=time.time)
 
 
 class DecisionSnapshot(BaseModel):
@@ -45,6 +55,7 @@ class DecisionSnapshot(BaseModel):
     risk_snapshot: Dict[str, Any] = Field(default_factory=dict)
     compliance_snapshot: Dict[str, Any] = Field(default_factory=dict)
     strategy_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    provenance_snapshot: Dict[str, FieldProvenance] = Field(default_factory=dict)
     ai_sidecar_snapshot: Dict[str, Any] = Field(default_factory=dict)
     
     integrity_hash: str = ""
@@ -72,6 +83,7 @@ class DecisionAuditTrailEngine:
         risk_snapshot: Optional[Dict[str, Any]] = None,
         compliance_snapshot: Optional[Dict[str, Any]] = None,
         strategy_snapshot: Optional[Dict[str, Any]] = None,
+        provenance_snapshot: Optional[Dict[str, FieldProvenance]] = None,
         ai_sidecar_snapshot: Optional[Dict[str, Any]] = None,
     ) -> DecisionSnapshot:
         decision_id = f"DEC-{uuid.uuid4().hex[:10].upper()}"
@@ -89,6 +101,7 @@ class DecisionAuditTrailEngine:
             "risk": risk_snapshot or {},
             "compliance": compliance_snapshot or {},
             "strategy": strategy_snapshot or {},
+            "provenance": {k: v.model_dump() if hasattr(v, 'model_dump') else v for k, v in (provenance_snapshot or {}).items()},
             "ai": ai_sidecar_snapshot or {},
         }
 
@@ -107,6 +120,7 @@ class DecisionAuditTrailEngine:
             risk_snapshot=risk_snapshot or {},
             compliance_snapshot=compliance_snapshot or {},
             strategy_snapshot=strategy_snapshot or {},
+            provenance_snapshot=provenance_snapshot or {},
             ai_sidecar_snapshot=ai_sidecar_snapshot or {},
             integrity_hash=integrity_hash,
         )
@@ -131,6 +145,7 @@ class DecisionAuditTrailEngine:
             "risk": snapshot.risk_snapshot,
             "compliance": snapshot.compliance_snapshot,
             "strategy": snapshot.strategy_snapshot,
+            "provenance": {k: v.model_dump() if hasattr(v, 'model_dump') else v for k, v in snapshot.provenance_snapshot.items()},
             "ai": snapshot.ai_sidecar_snapshot,
         }
 
@@ -142,3 +157,7 @@ class DecisionAuditTrailEngine:
 
     def list_recent(self, limit: int = 50) -> List[DecisionSnapshot]:
         return sorted(self._snapshots.values(), key=lambda s: s.timestamp, reverse=True)[:limit]
+
+
+# Global Decision Audit Engine Singleton
+audit_trail_engine = DecisionAuditTrailEngine()

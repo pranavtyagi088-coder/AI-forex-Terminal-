@@ -1,4 +1,4 @@
-import time
+﻿import time
 import uuid
 from enum import Enum
 from typing import Dict, Optional, List
@@ -18,6 +18,8 @@ class ProposalStatus(str, Enum):
 
 class StagedProposal(BaseModel):
     proposal_id: str
+    decision_id: Optional[str] = None
+    integrity_hash: Optional[str] = None
     idempotency_key: str
     symbol: str
     direction: str
@@ -58,6 +60,8 @@ class OrderStagingManager:
         if not gate_res.allowed:
             proposal = StagedProposal(
                 proposal_id=prop_id,
+                decision_id=gate_res.decision_id,
+                integrity_hash=gate_res.integrity_hash,
                 idempotency_key=idempotency_key,
                 symbol=req.symbol.upper(),
                 direction=req.direction,
@@ -76,6 +80,8 @@ class OrderStagingManager:
         else:
             proposal = StagedProposal(
                 proposal_id=prop_id,
+                decision_id=gate_res.decision_id,
+                integrity_hash=gate_res.integrity_hash,
                 idempotency_key=idempotency_key,
                 symbol=req.symbol.upper(),
                 direction=req.direction,

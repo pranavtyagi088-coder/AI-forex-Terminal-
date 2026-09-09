@@ -51,3 +51,33 @@ def reset_circuit_breaker():
 def auth_headers():
     from app.core.config import settings
     return {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
+
+
+
+
+
+
+@pytest.fixture(autouse=True)
+def _reset_circuit_breaker_isolation():
+    """Ensure persistent disk kill-switch is reset safely for clean test isolation."""
+    import os, glob
+    for f in glob.glob("**/circuit_breaker*.json", recursive=True):
+        try: os.remove(f)
+        except Exception: pass
+
+    try:
+        from app.engines.risk.circuit_breaker import CircuitBreakerEngine
+        cb = CircuitBreakerEngine()
+        for method_name in ["reset_circuit_breaker", "reset_breaker", "reset_state", "reset"]:
+            if hasattr(cb, method_name):
+                getattr(cb, method_name)("Pytest Isolation Reset")
+                break
+    except Exception:
+        pass
+
+    yield
+
+    for f in glob.glob("**/circuit_breaker*.json", recursive=True):
+        try: os.remove(f)
+        except Exception: pass
+

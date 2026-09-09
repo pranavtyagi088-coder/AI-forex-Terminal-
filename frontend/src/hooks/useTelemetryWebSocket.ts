@@ -1,9 +1,10 @@
 ﻿import { useEffect, useRef, useCallback } from 'react';
 import { useCockpitStore } from '../store/useCockpitStore';
 import { TerminalEvent } from '../types/telemetry';
+import { env } from '../lib/env';
 
-const WS_BASE_URL = "ws://127.0.0.1:8000/ws/telemetry";
-const AUTH_TOKEN = "dev-secret-token";
+const WS_BASE_URL = env.WS_BASE_URL;
+const AUTH_TOKEN = env.API_AUTH_TOKEN;
 
 export function useTelemetryWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);

@@ -1,11 +1,14 @@
 ﻿import { create } from 'zustand';
 import { TerminalEvent, CockpitTelemetrySnapshot } from '../types/telemetry';
+import { api } from '../lib/api';
 
 interface CockpitState {
   wsConnected: boolean;
   clientId: string | null;
   lastPingTimestamp: number | null;
   telemetry: CockpitTelemetrySnapshot | null;
+  telemetryLoading: boolean;
+  telemetryError: string | null;
   events: TerminalEvent[];
   circuitBreakerTripped: boolean;
   circuitBreakerReason: string | null;
@@ -17,6 +20,7 @@ interface CockpitState {
   setEvents: (events: TerminalEvent[]) => void;
   setCircuitBreaker: (tripped: boolean, reason?: string) => void;
   setLastPing: (timestamp: number) => void;
+  fetchSnapshot: () => Promise<void>;
 }
 
 export const useCockpitStore = create<CockpitState>((set) => ({
@@ -24,6 +28,8 @@ export const useCockpitStore = create<CockpitState>((set) => ({
   clientId: null,
   lastPingTimestamp: null,
   telemetry: null,
+  telemetryLoading: false,
+  telemetryError: null,
   events: [],
   circuitBreakerTripped: false,
   circuitBreakerReason: null,
@@ -39,6 +45,7 @@ export const useCockpitStore = create<CockpitState>((set) => ({
       telemetry: snapshot,
       circuitBreakerTripped: snapshot.circuit_breaker_active,
       circuitBreakerReason: snapshot.circuit_breaker_reason || null,
+      telemetryError: null,
     }),
 
   addEvent: (event) =>
@@ -69,4 +76,34 @@ export const useCockpitStore = create<CockpitState>((set) => ({
     }),
 
   setLastPing: (timestamp) => set({ lastPingTimestamp: timestamp }),
+
+  fetchSnapshot: async () => {
+    set({ telemetryLoading: true, telemetryError: null });
+    try {
+      const snapshot = await api.getTelemetrySnapshot();
+      let recentEvents: TerminalEvent[] = [];
+      try {
+        recentEvents = await api.getRecentEvents(50);
+      } catch (eventErr) {
+        // Safe degrade: if event log fails but snapshot succeeds, keep logging but don't crash whole app
+        console.warn("⚠️ Failed to load recent events snapshot:", eventErr);
+      }
+
+      set({
+        telemetry: snapshot,
+        circuitBreakerTripped: snapshot.circuit_breaker_active,
+        circuitBreakerReason: snapshot.circuit_breaker_reason || null,
+        events: recentEvents,
+        telemetryLoading: false,
+        telemetryError: null,
+      });
+    } catch (err: any) {
+      // Fail-closed: telemetry set to null, never fabricate status
+      set({
+        telemetry: null,
+        telemetryLoading: false,
+        telemetryError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }));

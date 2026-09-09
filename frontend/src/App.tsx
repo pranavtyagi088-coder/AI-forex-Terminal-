@@ -1,5 +1,6 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useTelemetryWebSocket } from './hooks/useTelemetryWebSocket';
+import { useCockpitStore } from './store/useCockpitStore';
 import { CockpitHeader } from './components/cockpit/CockpitHeader';
 import { RiskRadarGauges } from './components/cockpit/RiskRadarGauges';
 import { PreFlightTerminal } from './components/cockpit/PreFlightTerminal';
@@ -13,6 +14,13 @@ import { TradeJournalView } from './components/TradeJournalView';
 import { LayoutDashboard, FlaskConical, Award, BookOpen } from 'lucide-react';
 
 export function App() {
+  const fetchSnapshot = useCockpitStore((state) => state.fetchSnapshot);
+
+  // Trigger authoritative initial telemetry snapshot hydration on mount
+  useEffect(() => {
+    fetchSnapshot();
+  }, [fetchSnapshot]);
+
   // Mount real-time WebSocket telemetry stream (fail-closed auto reconnect)
   useTelemetryWebSocket();
 

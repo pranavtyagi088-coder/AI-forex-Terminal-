@@ -1,7 +1,8 @@
 ﻿import { PreFlightRequest, PreFlightResponse, CockpitTelemetrySnapshot, TerminalEvent } from '../types/telemetry';
+import { env } from './env';
 
-const API_BASE = "http://127.0.0.1:8000";
-const AUTH_TOKEN = "dev-secret-token";
+const API_BASE = env.API_BASE_URL;
+const AUTH_TOKEN = env.API_AUTH_TOKEN;
 
 export class NormalizedApiError extends Error {
   public status: number;

@@ -1,94 +1,68 @@
-﻿import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+import { env } from '../lib/env';
 import { useCockpitStore } from '../store/useCockpitStore';
 import { TerminalEvent } from '../types/telemetry';
-import { env } from '../lib/env';
 
 const WS_BASE_URL = env.WS_BASE_URL;
 const AUTH_TOKEN = env.API_AUTH_TOKEN;
 
 export function useTelemetryWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const { setWsConnected, addEvent, setLastPing } = useCockpitStore();
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
-    try {
-      const url = `${WS_BASE_URL}?token=${AUTH_TOKEN}`;
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
+    const url = WS_BASE_URL + '?token=' + AUTH_TOKEN;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
 
-      ws.onopen = () => {
-        console.log("⚡ [WebSocket] Connected to Institutional Telemetry Stream");
-        setWsConnected(true);
+    ws.onopen = () => {
+      console.log('⚡ [WebSocket] Connected to Institutional Telemetry Stream');
+      setWsConnected(true);
+    };
 
-        pingIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send("ping");
-          }
-        }, 25000);
-      };
-
-      ws.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-
-          if (data.type === 'PONG') {
-            setLastPing(data.timestamp);
-            return;
-          }
-
-          if (data.type === 'SYSTEM' && data.client_id) {
-            setWsConnected(true, data.client_id);
-          }
-
-          const terminalEvent: TerminalEvent = {
-            event_id: data.event_id || `EVT-${Date.now()}`,
-            type: data.type,
-            severity: data.severity || 'INFO',
-            source: data.source || data.source_module || 'ws_stream',
-            message: data.message || JSON.stringify(data),
-            symbol: data.symbol || null,
-            payload: data.payload || data,
-            timestamp: data.timestamp || Date.now() / 1000,
-          };
-
-          addEvent(terminalEvent);
-        } catch (err) {
-          console.error("❌ Failed to parse incoming WebSocket message:", err);
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        setLastPing();
+        if (data.type === 'SYSTEM' && data.message && data.message.includes('Connected')) {
+          setWsConnected(true, data.client_id);
+          return;
         }
-      };
 
-      ws.onclose = () => {
-        setWsConnected(false);
-        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-        reconnectTimeoutRef.current = setTimeout(connect, 3000);
-      };
+        const event: TerminalEvent = {
+          id: data.id || data.decision_id || ('EVT-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
+          timestamp: data.timestamp || (Date.now() / 1000),
+          severity: data.severity || 'INFO',
+          type: data.type || 'SYSTEM',
+          source: data.source || data.source_module || 'ws_stream',
+          message: data.message || data.details || JSON.stringify(data),
+          details: data,
+        };
 
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {
-      reconnectTimeoutRef.current = setTimeout(connect, 5000);
-    }
-  }, [setWsConnected, addEvent, setLastPing]);
+        addEvent(event);
+      } catch (err) {
+        console.error('❌ Failed to parse WebSocket message:', err);
+      }
+    };
 
-  useEffect(() => {
-    connect();
+    ws.onclose = () => {
+      setWsConnected(false);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
 
     return () => {
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, [connect]);
+  }, [setWsConnected, addEvent, setLastPing]);
 
   const sendCommand = (cmd: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

@@ -21,6 +21,21 @@ class CockpitTelemetryPayload(BaseModel):
     last_decision_id: Optional[str] = None
     system_latency_ms: float = 0.5
     is_live_telemetry_healthy: bool = True
+    account_balance: float = 100000.0
+    daily_pnl: float = 0.0
+    current_daily_drawdown_pct: float = 0.0
+    current_total_drawdown_pct: float = 0.0
+    max_daily_drawdown_pct: float = 5.0
+    max_total_drawdown_pct: float = 10.0
+    circuit_breaker_active: bool = False
+    circuit_breaker_reason: Optional[str] = None
+    active_market_regime: str = "DETERMINISTIC_SCAN"
+    regime_confidence: float = 85.0
+    news_blackout_active: bool = False
+    active_open_trades_count: int = 0
+    total_cluster_exposure_pct: dict = Field(default_factory=dict)
+    active_strategies_health: dict = Field(default_factory=dict)
+    last_updated: float = Field(default_factory=time.time)
 
 
 class TelemetryBroadcaster:
@@ -40,16 +55,32 @@ class TelemetryBroadcaster:
 
         last_dec_id = recent_decisions[0].decision_id if recent_decisions else None
 
+        is_kb = cb_snap.state.value == "KILL_SWITCH"
         return CockpitTelemetryPayload(
             timestamp=time.time(),
-            terminal_state="HALTED" if cb_snap.state.value == "KILL_SWITCH" else "ACTIVE",
+            terminal_state="HALTED" if is_kb else "ACTIVE",
             circuit_breaker_state=cb_snap.state.value,
             total_events_recorded=len(all_events),
             recent_critical_events_count=len(critical_events),
             recent_decisions_count=len(recent_decisions),
             last_decision_id=last_dec_id,
             system_latency_ms=0.45,
-            is_live_telemetry_healthy=(cb_snap.state.value != "KILL_SWITCH"),
+            is_live_telemetry_healthy=(not is_kb),
+            account_balance=100000.0,
+            daily_pnl=0.0,
+            current_daily_drawdown_pct=0.0,
+            current_total_drawdown_pct=0.0,
+            max_daily_drawdown_pct=5.0,
+            max_total_drawdown_pct=10.0,
+            circuit_breaker_active=is_kb,
+            circuit_breaker_reason=cb_snap.reason if is_kb else None,
+            active_market_regime="DETERMINISTIC_SCAN",
+            regime_confidence=85.0,
+            news_blackout_active=False,
+            active_open_trades_count=0,
+            total_cluster_exposure_pct={},
+            active_strategies_health={"trend_continuation": "ACTIVE", "liquidity_sweep": "ACTIVE", "mean_reversion": "CAUTION"},
+            last_updated=time.time(),
         )
 
 

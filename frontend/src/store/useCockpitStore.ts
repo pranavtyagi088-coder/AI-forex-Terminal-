@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { TerminalEvent, CockpitTelemetrySnapshot } from '../types/telemetry';
 import { api } from '../lib/api';
 

@@ -3,9 +3,6 @@ import { env } from '../lib/env';
 import { useCockpitStore } from '../store/useCockpitStore';
 import { TerminalEvent } from '../types/telemetry';
 
-const WS_BASE_URL = env.WS_BASE_URL;
-const AUTH_TOKEN = env.API_AUTH_TOKEN;
-
 export function useTelemetryWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const { setWsConnected, addEvent, setLastPing } = useCockpitStore();
@@ -15,12 +12,13 @@ export function useTelemetryWebSocket() {
       return;
     }
 
-    const url = WS_BASE_URL + '?token=' + AUTH_TOKEN;
+    const url = env.WS_BASE_URL + '?token=' + env.API_AUTH_TOKEN;
+    console.log('🔌 [WebSocket] Connecting to:', url);
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('⚡ [WebSocket] Connected to Institutional Telemetry Stream');
+      console.log('⚡ [WebSocket] Connected successfully!');
       setWsConnected(true);
     };
 
@@ -28,10 +26,7 @@ export function useTelemetryWebSocket() {
       try {
         const data = JSON.parse(evt.data);
         setLastPing();
-        if (data.type === 'SYSTEM' && data.message && data.message.includes('Connected')) {
-          setWsConnected(true, data.client_id);
-          return;
-        }
+        setWsConnected(true);
 
         const event: TerminalEvent = {
           id: data.id || data.decision_id || ('EVT-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
@@ -50,10 +45,12 @@ export function useTelemetryWebSocket() {
     };
 
     ws.onclose = () => {
+      console.warn('⚠️ [WebSocket] Stream Disconnected');
       setWsConnected(false);
     };
 
-    ws.onerror = () => {
+    ws.onerror = (err) => {
+      console.error('❌ [WebSocket] Stream Error:', err);
       ws.close();
     };
 

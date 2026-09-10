@@ -267,3 +267,7 @@ class CircuitBreakerEngine:
         self._details = [reason]
         self._save_persistent_state()
         return self._build_snapshot(0.0, 0.0, 0, 0.0)
+
+
+# Global shared singleton instance for system-wide circuit breaker state
+global_circuit_breaker = CircuitBreakerEngine()

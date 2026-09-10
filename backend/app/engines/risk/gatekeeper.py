@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.engines.risk.correlation import CorrelationRiskEngine, OpenPositionInput, AggregateRiskResult
 from app.engines.risk.instruments import InstrumentRegistry, InstrumentSpec, AssetClass
-from app.engines.risk.circuit_breaker import CircuitBreakerEngine, BreakerState
+from app.engines.risk.circuit_breaker import CircuitBreakerEngine, global_circuit_breaker, BreakerState
 from app.services.broker.adapters import check_account_freshness, DataStatus
 from app.engines.events.bus import event_bus, EventType, EventSeverity
 from app.engines.decision.snapshot import (
@@ -88,7 +88,7 @@ class PreFlightGatekeeper:
     ):
         self.correlation_engine = correlation_engine or CorrelationRiskEngine()
         self.instrument_registry = instrument_registry or InstrumentRegistry()
-        self.circuit_breaker = circuit_breaker or CircuitBreakerEngine()
+        self.circuit_breaker = circuit_breaker or global_circuit_breaker
         self.audit_engine = audit_engine or audit_trail_engine
 
     def _calculate_pip_value(self, spec: InstrumentSpec, entry_price: float, quotes: Dict[str, float]) -> float:

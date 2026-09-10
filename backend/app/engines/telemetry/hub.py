@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.engines.events.bus import event_bus, TerminalEvent
 from app.engines.decision.snapshot import audit_trail_engine
-from app.engines.risk.circuit_breaker import CircuitBreakerEngine
+from app.engines.risk.circuit_breaker import CircuitBreakerEngine, global_circuit_breaker
 
 
 class CockpitTelemetryPayload(BaseModel):
@@ -45,7 +45,7 @@ class TelemetryBroadcaster:
     """
 
     def __init__(self, breaker: Optional[CircuitBreakerEngine] = None):
-        self.breaker = breaker or CircuitBreakerEngine()
+        self.breaker = breaker or global_circuit_breaker
 
     def generate_cockpit_snapshot(self) -> CockpitTelemetryPayload:
         cb_snap = self.breaker.evaluate()

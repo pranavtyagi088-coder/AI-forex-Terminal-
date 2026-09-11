@@ -35,6 +35,7 @@ class CockpitTelemetryPayload(BaseModel):
     active_open_trades_count: int = 0
     total_cluster_exposure_pct: dict = Field(default_factory=dict)
     active_strategies_health: dict = Field(default_factory=dict)
+    sweep_intelligence: dict = Field(default_factory=dict)
     last_updated: float = Field(default_factory=time.time)
 
 
@@ -80,6 +81,7 @@ class TelemetryBroadcaster:
             active_open_trades_count=0,
             total_cluster_exposure_pct={},
             active_strategies_health={"trend_continuation": "ACTIVE", "liquidity_sweep": "ACTIVE", "mean_reversion": "CAUTION"},
+            sweep_intelligence={"sweep_detected": True, "active_symbol": "EURUSD", "bias": "FADE_SELL", "sweep_depth_pips": 8.2, "wick_ratio": 0.78, "volume_spike": 2.3, "confidence": 0.82, "evidence_weight": 0.12},
             last_updated=time.time(),
         )
 

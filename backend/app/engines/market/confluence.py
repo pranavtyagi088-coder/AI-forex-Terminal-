@@ -199,3 +199,54 @@ class ConfluenceScoringEngine:
             positive_confluences=positive_factors,
             negative_frictions=negative_factors,
         )
+
+
+# ── Phase 2C Liquidity Sweep Integration ─────────────────────
+from app.engines.intelligence.liquidity_sweep import SweepAnalysisResult, SweepDirection
+
+def apply_sweep_evidence_to_confluence(
+    base_score: float,
+    proposed_direction: str,
+    sweep_result: Optional[SweepAnalysisResult],
+    positive_confluences: List[str],
+    negative_warnings: List[str]
+) -> float:
+    """
+    Applies deterministic liquidity sweep evidence to confluence score.
+    Max weight capped at 15% (Golden Rule #8).
+    """
+    if not sweep_result or not sweep_result.active_sweep:
+        return base_score
+
+    sweep = sweep_result.active_sweep
+    dir_upper = proposed_direction.upper()
+
+    # If proposing BUY after SELL-SIDE sweep (fading the sweep of lows)
+    if dir_upper == "BUY" and sweep.direction == SweepDirection.SELL_SIDE:
+        bonus = round(min(sweep.confidence_score * 12.0, 12.0), 1)
+        base_score += bonus
+        positive_confluences.append(
+            f"LIQUIDITY_SWEEP_CONFIRMED: Bullish rejection of equal lows (+{bonus} pts, confidence {sweep.confidence_score*100:.0f}%)"
+        )
+    # If proposing SELL after BUY-SIDE sweep (fading the sweep of highs)
+    elif dir_upper == "SELL" and sweep.direction == SweepDirection.BUY_SIDE:
+        bonus = round(min(sweep.confidence_score * 12.0, 12.0), 1)
+        base_score += bonus
+        positive_confluences.append(
+            f"LIQUIDITY_SWEEP_CONFIRMED: Bearish rejection of equal highs (+{bonus} pts, confidence {sweep.confidence_score*100:.0f}%)"
+        )
+    # Counter-sweep hazard: buying directly into swept highs without confirmation
+    elif dir_upper == "BUY" and sweep.direction == SweepDirection.BUY_SIDE:
+        penalty = 10.0
+        base_score = max(0.0, base_score - penalty)
+        negative_warnings.append(
+            "COUNTER_SWEEP_RISK: Buying directly into recently swept buy-side liquidity (-10 pts)"
+        )
+    elif dir_upper == "SELL" and sweep.direction == SweepDirection.SELL_SIDE:
+        penalty = 10.0
+        base_score = max(0.0, base_score - penalty)
+        negative_warnings.append(
+            "COUNTER_SWEEP_RISK: Selling directly into recently swept sell-side liquidity (-10 pts)"
+        )
+
+    return min(100.0, max(0.0, base_score))

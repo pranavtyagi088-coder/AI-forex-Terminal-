@@ -65,6 +65,18 @@ export interface CockpitTelemetrySnapshot {
   active_open_trades_count?: number;
   total_cluster_exposure_pct?: Record<string, number>;
   active_strategies_health?: Record<string, 'ACTIVE' | 'CAUTION' | 'DEGRADED' | 'RETIRED' | 'SUSPENDED'>;
+  sweep_intelligence?: SweepIntelligenceData;
   recent_events?: TerminalEvent[];
   last_updated?: number;
+}
+
+export interface SweepIntelligenceData {
+  sweep_detected: boolean;
+  active_symbol?: string;
+  bias?: 'FADE_BUY' | 'FADE_SELL' | 'NEUTRAL';
+  sweep_depth_pips?: number;
+  wick_ratio?: number;
+  volume_spike?: number;
+  confidence?: number;
+  evidence_weight?: number;
 }

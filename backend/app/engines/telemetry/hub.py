@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import time
 import json
@@ -36,6 +36,7 @@ class CockpitTelemetryPayload(BaseModel):
     total_cluster_exposure_pct: dict = Field(default_factory=dict)
     active_strategies_health: dict = Field(default_factory=dict)
     sweep_intelligence: dict = Field(default_factory=dict)
+    zone_intelligence: dict = Field(default_factory=dict)
     last_updated: float = Field(default_factory=time.time)
 
 

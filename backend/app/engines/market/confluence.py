@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -250,3 +250,53 @@ def apply_sweep_evidence_to_confluence(
         )
 
     return min(100.0, max(0.0, base_score))
+
+
+def apply_zone_evidence_to_confluence(
+    base_score: float,
+    zone_result: dict,
+    trade_direction: str,
+    current_price: float,
+) -> float:
+    """
+    Applies deterministic liquidity zone evidence to the multi-factor confluence score.
+    Follows Institutional Rule #8: Advisory evidence bounded and risk-weighted.
+
+    Scoring Logic:
+      +12 pts: Aligned zone support (e.g. BUY near high-ranking Bullish OB/FVG)
+      -10 pts: Hazard penalty (e.g. BUY directly into Bearish resistance candidate)
+       0 pts: If zones are UNAVAILABLE, mitigated, or neutral.
+    """
+    if not zone_result or zone_result.get("status") == "UNAVAILABLE":
+        return base_score
+
+    top_zones = zone_result.get("top_zones", [])
+    if not top_zones:
+        return base_score
+
+    adjusted_score = base_score
+    top_zone = top_zones[0]
+    zone_type = top_zone.get("zone_type", "")
+    zone_low = float(top_zone.get("low", 0.0))
+    zone_high = float(top_zone.get("high", 0.0))
+    zone_score = float(top_zone.get("score", 0.0))
+
+    if zone_score < 25.0:
+        return adjusted_score
+
+    # Check if price is within or near zone boundary (within 0.5% proximity buffer)
+    proximity_buffer = (zone_high - zone_low) * 0.5 if (zone_high > zone_low) else 0.0005
+    is_at_zone = (zone_low - proximity_buffer) <= current_price <= (zone_high + proximity_buffer)
+
+    if trade_direction.upper() == "BUY":
+        if "BULLISH" in zone_type and is_at_zone:
+            adjusted_score += 12.0
+        elif "BEARISH" in zone_type and is_at_zone:
+            adjusted_score -= 10.0
+    elif trade_direction.upper() == "SELL":
+        if "BEARISH" in zone_type and is_at_zone:
+            adjusted_score += 12.0
+        elif "BULLISH" in zone_type and is_at_zone:
+            adjusted_score -= 10.0
+
+    return max(0.0, min(100.0, adjusted_score))

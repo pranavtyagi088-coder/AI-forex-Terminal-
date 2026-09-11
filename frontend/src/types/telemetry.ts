@@ -1,4 +1,4 @@
-﻿export type EventSeverity = 'INFO' | 'WARN' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'EMERGENCY' | 'DEBUG';
+export type EventSeverity = 'INFO' | 'WARN' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'EMERGENCY' | 'DEBUG';
 
 export interface TerminalEvent {
   event_id: string;
@@ -66,6 +66,7 @@ export interface CockpitTelemetrySnapshot {
   total_cluster_exposure_pct?: Record<string, number>;
   active_strategies_health?: Record<string, 'ACTIVE' | 'CAUTION' | 'DEGRADED' | 'RETIRED' | 'SUSPENDED'>;
   sweep_intelligence?: SweepIntelligenceData;
+  zone_intelligence?: ZoneIntelligenceData;
   recent_events?: TerminalEvent[];
   last_updated?: number;
 }
@@ -79,4 +80,20 @@ export interface SweepIntelligenceData {
   volume_spike?: number;
   confidence?: number;
   evidence_weight?: number;
+}
+
+export interface ZoneCandidate {
+  zone_type: 'BULLISH_ORDER_BLOCK' | 'BEARISH_ORDER_BLOCK' | 'BULLISH_FVG' | 'BEARISH_FVG' | string;
+  high: number;
+  low: number;
+  score: number;
+  touches: number;
+  is_mitigated: boolean;
+  bars_since_creation: number;
+}
+
+export interface ZoneIntelligenceData {
+  status: 'ACTIVE' | 'UNAVAILABLE' | 'COMPUTING';
+  top_zones: ZoneCandidate[];
+  evidence_weight: number;
 }

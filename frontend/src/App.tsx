@@ -1,3 +1,4 @@
+import { ZoneRadarPanel } from './components/cockpit/ZoneRadarPanel';
 import React, { useState, useEffect } from 'react';
 import { useTelemetryWebSocket } from './hooks/useTelemetryWebSocket';
 import { useCockpitStore } from './store/useCockpitStore';
@@ -96,6 +97,7 @@ export function App() {
               </div>
               <div className="xl:col-span-5 space-y-6">
                 <SweepIntelligencePanel />
+        <ZoneRadarPanel />
                 <StrategyRegimePanel />
               </div>
             </div>

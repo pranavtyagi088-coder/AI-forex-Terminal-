@@ -1,9 +1,15 @@
-﻿import asyncio
+import asyncio
 import os
 import pytest
+from pathlib import Path
+
 from app.core.database import init_db
-from app.engines.risk.circuit_breaker import CircuitBreakerEngine, _BREAKER_STATE_FILE
-from app.engines.risk import gatekeeper as gk_module
+from app.engines.risk.circuit_breaker import (
+    global_circuit_breaker,
+    BreakerState,
+    _BREAKER_STATE_FILE,
+)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database_session():
@@ -14,70 +20,43 @@ def setup_test_database_session():
     finally:
         loop.close()
 
-@pytest.fixture(autouse=True)
-def reset_circuit_breaker():
-    def _do_reset():
-        # 1. Reset via engine instance
-        cb = CircuitBreakerEngine()
-        try:
-            cb.manual_reset(admin_confirmed=True)
-        except Exception:
-            pass
-
-        # 2. Reset module-level singleton if exists in gatekeeper
-        if hasattr(gk_module, "breaker_engine"):
-            try:
-                gk_module.breaker_engine.manual_reset(admin_confirmed=True)
-            except Exception:
-                pass
-        if hasattr(gk_module, "_circuit_breaker"):
-            try:
-                gk_module._circuit_breaker.manual_reset(admin_confirmed=True)
-            except Exception:
-                pass
-
-        # 3. Clean physical state file
-        if os.path.exists(_BREAKER_STATE_FILE):
-            try:
-                os.remove(_BREAKER_STATE_FILE)
-            except Exception:
-                pass
-
-    _do_reset()
-    yield
-    _do_reset()
-
-@pytest.fixture
-def auth_headers():
-    from app.core.config import settings
-    return {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
-
-
-
-
-
 
 @pytest.fixture(autouse=True)
-def _reset_circuit_breaker_isolation():
-    """Ensure persistent disk kill-switch is reset safely for clean test isolation."""
-    import os, glob
-    for f in glob.glob("**/circuit_breaker*.json", recursive=True):
-        try: os.remove(f)
-        except Exception: pass
-
+def reset_global_circuit_breaker_singleton():
+    """
+    Institutional Fix: Resets the ACTUAL module-level singleton before every test.
+    Previous fixture created a NEW instance which never touched the real singleton
+    used by gatekeeper.py, hub.py, and routes/admin.py. This caused persistent
+    KILL_SWITCH state to leak across tests after P1-04 E2E toggle scenarios.
+    """
+    # 1. Delete persistent state file (prevents disk-based state leak)
     try:
-        from app.engines.risk.circuit_breaker import CircuitBreakerEngine
-        cb = CircuitBreakerEngine()
-        for method_name in ["reset_circuit_breaker", "reset_breaker", "reset_state", "reset"]:
-            if hasattr(cb, method_name):
-                getattr(cb, method_name)("Pytest Isolation Reset")
-                break
+        state_path = Path(_BREAKER_STATE_FILE)
+        if state_path.exists():
+            state_path.unlink()
+    except Exception:
+        pass
+
+    # 2. Reset the actual singleton in-memory
+    try:
+        global_circuit_breaker.manual_reset(admin_confirmed=True)
+    except Exception:
+        # If already in NORMAL state, manual_reset may be a no-op
+        pass
+
+    # 3. Force state attribute directly as belt-and-braces safety
+    try:
+        if hasattr(global_circuit_breaker, "state"):
+            global_circuit_breaker.state = BreakerState.NORMAL
+        if hasattr(global_circuit_breaker, "_state"):
+            global_circuit_breaker._state = BreakerState.NORMAL
     except Exception:
         pass
 
     yield
 
-    for f in glob.glob("**/circuit_breaker*.json", recursive=True):
-        try: os.remove(f)
-        except Exception: pass
-
+    # Cleanup after test - ensure no test leaves the singleton in KILL_SWITCH
+    try:
+        global_circuit_breaker.manual_reset(admin_confirmed=True)
+    except Exception:
+        pass

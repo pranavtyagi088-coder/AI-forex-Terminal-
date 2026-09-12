@@ -1,8 +1,5 @@
-﻿"""
-Institutional AI Forex Terminal — Main Application Entrypoint.
-Deterministic, Evidence-Driven, Risk-First Architecture.
-Lifespan Management: Zero-deprecation asynccontextmanager lifecycle.
-"""
+from __future__ import annotations
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -11,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.engines.events.bus import event_bus
 from app.engines.telemetry.ws_manager import ws_manager
+from app.engines.telemetry.redis_bus import redis_bus
 
 # ── Router Imports ──
 from app.api.routes.admin import router as admin_router
@@ -37,19 +35,19 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Institutional Lifespan Management.
-    Handles startup event registration and graceful shutdown disconnects.
-    """
     # ── STARTUP ──
     logger.info("Initializing Institutional AI Forex Terminal...")
     event_bus.register_subscriber(ws_manager.broadcast)
+    if settings.REDIS_ENABLED:
+        await redis_bus.connect()
     await ws_manager.start_heartbeat()
     yield
     # ── SHUTDOWN ──
     logger.info("Gracefully shutting down Institutional AI Forex Terminal...")
     await ws_manager.stop_heartbeat()
     await ws_manager.disconnect_all()
+    if settings.REDIS_ENABLED:
+        await redis_bus.close()
 
 
 app = FastAPI(

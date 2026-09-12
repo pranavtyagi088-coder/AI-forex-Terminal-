@@ -95,6 +95,47 @@ def get_proposal_status(proposal_id: str) -> StagedProposal:
     return proposal
 
 
+@router.get("/proposals")
+async def list_all_proposals(_token: str = Depends(verify_api_token)):
+    """List all staged proposals in memory (pending + processed)."""
+    proposals = staging_manager.list_all_proposals() if hasattr(staging_manager, 'list_all_proposals') else []
+    return {
+        "proposals": [
+            {
+                "proposal_id": p.proposal_id,
+                "status": p.status,
+                "symbol": p.request.symbol,
+                "direction": p.request.direction,
+                "entry_price": float(p.request.entry_price),
+                "stop_loss": float(p.request.stop_loss),
+                "take_profit": float(p.request.take_profit) if p.request.take_profit else None,
+                "position_size_lots": float(p.request.position_size_lots) if hasattr(p.request, 'position_size_lots') else None,
+                "gates_passed": p.gates_passed if hasattr(p, 'gates_passed') else 0,
+                "created_at": p.created_at.isoformat() if hasattr(p, 'created_at') and p.created_at else None,
+            }
+            for p in proposals
+        ],
+        "total": len(proposals),
+    }
+
+
+@router.post("/proposals/{proposal_id}/reject")
+async def reject_proposal(proposal_id: str, _token: str = Depends(verify_api_token)):
+    """Manually reject a staged proposal (human veto)."""
+    proposal = staging_manager.get_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(404, f"Proposal {proposal_id} not found")
+    if hasattr(staging_manager, 'reject_proposal'):
+        staging_manager.reject_proposal(proposal_id, reason="MANUAL_HUMAN_VETO")
+    else:
+        proposal.status = "REJECTED"
+    return {
+        "proposal_id": proposal_id,
+        "status": "REJECTED",
+        "reason": "MANUAL_HUMAN_VETO",
+    }
+
+
 @router.post("/proposals/{proposal_id}/approve")
 async def approve_and_execute_proposal(
     proposal_id: str,

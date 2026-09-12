@@ -1,4 +1,10 @@
-import pytest
+﻿from pathlib import Path
+
+ROOT = Path(r"C:\Users\PRANAV TYAGI\PycharmProjects\WelcomeScreen")
+
+# 1. Update backend/tests/test_broker_api.py
+bt_file = ROOT / "backend/tests/test_broker_api.py"
+correct_test_file = '''import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
@@ -115,3 +121,6 @@ async def test_list_and_reject_proposal():
         rej_res = await client.post(f"/api/trades/proposals/{proposal_id}/reject", headers=AUTH_HEADERS)
         assert rej_res.status_code == 200
         assert rej_res.json()["status"].lower() == "rejected"
+'''
+bt_file.write_text(correct_test_file, encoding="utf-8")
+print("[SUCCESS] backend/tests/test_broker_api.py assertions synchronized!")

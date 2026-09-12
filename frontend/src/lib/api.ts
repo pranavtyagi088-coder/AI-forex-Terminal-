@@ -138,4 +138,62 @@ export const api = {
       }
     );
   },
+
+  // ============= BROKER BRIDGE ENDPOINTS =============
+  getBrokerAccount: async () => {
+    return request<any>(
+      'getBrokerAccount',
+      API_BASE + '/api/trades/broker/account',
+      { headers: defaultHeaders() }
+    );
+  },
+
+  getBrokerPositions: async () => {
+    return request<any>(
+      'getBrokerPositions',
+      API_BASE + '/api/trades/broker/positions',
+      { headers: defaultHeaders() }
+    );
+  },
+
+  emergencyCloseAll: async (reason = 'MANUAL_EMERGENCY_LIQUIDATION') => {
+    return request<any>(
+      'emergencyCloseAll',
+      API_BASE + '/api/trades/broker/emergency-close',
+      {
+        method: 'POST',
+        headers: defaultHeaders(),
+        body: JSON.stringify({ reason }),
+      }
+    );
+  },
+
+  listProposals: async () => {
+    return request<any>(
+      'listProposals',
+      API_BASE + '/api/trades/proposals',
+      { headers: defaultHeaders() }
+    );
+  },
+
+  approveProposal: async (proposalId: string, idempotencyKey: string, executionMode: 'LIVE' | 'PAPER' = 'LIVE') => {
+    return request<any>(
+      'approveProposal',
+      API_BASE + '/api/trades/proposals/' + proposalId + '/approve',
+      {
+        method: 'POST',
+        headers: defaultHeaders(),
+        body: JSON.stringify({ idempotency_key: idempotencyKey, execution_mode: executionMode }),
+      }
+    );
+  },
+
+  rejectProposal: async (proposalId: string) => {
+    return request<any>(
+      'rejectProposal',
+      API_BASE + '/api/trades/proposals/' + proposalId + '/reject',
+      { method: 'POST', headers: defaultHeaders() }
+    );
+  },
+
 };

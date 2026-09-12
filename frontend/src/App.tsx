@@ -5,6 +5,7 @@ import { useCockpitStore } from './store/useCockpitStore';
 import { CockpitHeader } from './components/cockpit/CockpitHeader';
 import { RiskRadarGauges } from './components/cockpit/RiskRadarGauges';
 import { PreFlightTerminal } from './components/cockpit/PreFlightTerminal';
+import { BrokerBridgePanel } from './components/cockpit/BrokerBridgePanel';
 import { LiveEventStream } from './components/cockpit/LiveEventStream';
 import { StrategyRegimePanel } from './components/cockpit/StrategyRegimePanel';
 import { SweepIntelligencePanel } from './components/cockpit/SweepIntelligencePanel';
@@ -103,7 +104,9 @@ export function App() {
             </div>
 
             {/* Bottom Real-Time Event Audit Stream */}
-            <LiveEventStream />
+            <BrokerBridgePanel />
+
+          <LiveEventStream />
           </div>
         )}
 

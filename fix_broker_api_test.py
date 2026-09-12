@@ -1,4 +1,9 @@
-import pytest
+﻿from pathlib import Path
+
+ROOT = Path(r"C:\Users\PRANAV TYAGI\PycharmProjects\WelcomeScreen")
+bt_file = ROOT / "backend/tests/test_broker_api.py"
+
+clean_test_file = '''import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
@@ -49,6 +54,7 @@ async def test_stage_and_approve_live_broker_execution():
         assert res.status_code == 200
         proposal = res.json()
         assert proposal["proposal_id"] is not None
+        assert proposal["status"] in ["APPROVED", "PENDING_APPROVAL", "STAGED"]
         proposal_id = proposal["proposal_id"]
 
         # 2. Approve and Execute via Live Broker Adapter
@@ -64,11 +70,9 @@ async def test_stage_and_approve_live_broker_execution():
         )
         assert approve_res.status_code == 200
         exec_data = approve_res.json()
-        assert exec_data["status"].lower() == "success"
-        ticket = exec_data.get("ticket") or exec_data.get("broker_ticket")
-        assert ticket is not None
-        fill = exec_data.get("fill_price") or exec_data.get("entry_fill")
-        assert fill is not None and float(fill) > 0
+        assert exec_data["status"] == "SUCCESS"
+        assert exec_data["broker_ticket"] is not None
+        assert exec_data["entry_fill"] > 0
 
 
 @pytest.mark.asyncio
@@ -89,6 +93,7 @@ async def test_emergency_close_endpoint():
 async def test_list_and_reject_proposal():
     """Verify /proposals list endpoint and /proposals/{id}/reject workflow."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # 1. Stage proposal
         stage_payload = {
             "request": {
                 "symbol": "EURUSD",
@@ -105,13 +110,20 @@ async def test_list_and_reject_proposal():
         }
         stage_res = await client.post("/api/trades/proposals/stage", json=stage_payload, headers=AUTH_HEADERS)
         assert stage_res.status_code == 200
-        proposal_id = str(stage_res.json()["proposal_id"])
+        proposal_id = stage_res.json()["proposal_id"]
 
+        # 2. List all proposals
         list_res = await client.get("/api/trades/proposals", headers=AUTH_HEADERS)
         assert list_res.status_code == 200
         data = list_res.json()
         assert "proposals" in data
+        assert any(p["proposal_id"] == proposal_id for p in data["proposals"])
 
+        # 3. Reject proposal
         rej_res = await client.post(f"/api/trades/proposals/{proposal_id}/reject", headers=AUTH_HEADERS)
         assert rej_res.status_code == 200
-        assert rej_res.json()["status"].lower() == "rejected"
+        assert rej_res.json()["status"] == "REJECTED"
+'''
+
+bt_file.write_text(clean_test_file, encoding="utf-8")
+print("[SUCCESS] backend/tests/test_broker_api.py aligned to async client pattern.")

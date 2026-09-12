@@ -1,5 +1,6 @@
-﻿import os
+import os
 from typing import Optional, List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -18,16 +19,31 @@ class Settings(BaseSettings):
     
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///./forex_terminal.db"
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
     
-    # Market Data Integration (Twelve Data - Verified & Active)
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def asyncpg_url_normalize(cls, v: str) -> str:
+        if v and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v and v.startswith("postgresql://") and not v.startswith("postgresql+"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
+    # Redis & Pub/Sub Configuration
+    REDIS_URL: Optional[str] = "redis://localhost:6379/0"
+    REDIS_TELEMETRY_CHANNEL: str = "telemetry_events"
+    REDIS_ENABLED: bool = False
+    
+    # Market Data Integration
     TWELVE_DATA_API_KEY: Optional[str] = None
     
     # AI Providers
-    # PRIMARY: Gemini (verified active model: gemini-3.6-flash)
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-3.6-flash"
-    
-    # OPTIONAL FALLBACK: OpenAI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o"
     ANTHROPIC_API_KEY: Optional[str] = None

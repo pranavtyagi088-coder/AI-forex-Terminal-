@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import select
@@ -7,10 +7,20 @@ from app.core.config import settings
 class Base(DeclarativeBase):
     pass
 
+# Institutional Dual-Mode Engine Creation
+db_kwargs: Dict[str, Any] = {"echo": False, "future": True}
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    db_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    db_kwargs["pool_size"] = settings.DB_POOL_SIZE
+    db_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
+    db_kwargs["pool_timeout"] = settings.DB_POOL_TIMEOUT
+    db_kwargs["pool_recycle"] = settings.DB_POOL_RECYCLE
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=False,
-    future=True
+    **db_kwargs
 )
 
 AsyncSessionLocal = async_sessionmaker(

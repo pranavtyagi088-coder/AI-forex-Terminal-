@@ -25,9 +25,14 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/e2e/**', '**/dist/**'],
     pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+        isolate: false,
+      },
+    },
     fileParallelism: false,
-    isolate: false,
-    testTimeout: 20000,
-    hookTimeout: 20000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });

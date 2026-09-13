@@ -1,3 +1,4 @@
+import { AnalyticsLearningPanel } from './components/cockpit/AnalyticsLearningPanel';
 import { ZoneRadarPanel } from './components/cockpit/ZoneRadarPanel';
 import React, { useState, useEffect } from 'react';
 import { useTelemetryWebSocket } from './hooks/useTelemetryWebSocket';
@@ -104,6 +105,8 @@ export function App() {
             </div>
 
             {/* Bottom Real-Time Event Audit Stream */}
+            <AnalyticsLearningPanel />
+
             <BrokerBridgePanel />
 
           <LiveEventStream />

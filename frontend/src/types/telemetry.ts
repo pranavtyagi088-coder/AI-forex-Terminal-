@@ -97,3 +97,42 @@ export interface ZoneIntelligenceData {
   top_zones: ZoneCandidate[];
   evidence_weight: number;
 }
+
+export interface RollingPerformanceMetrics {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate_pct: number;
+  profit_factor: number;
+  expectancy_usd: number;
+  average_r_multiple: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  max_drawdown_pct: number;
+  max_drawdown_usd: number;
+  consecutive_losses_max: number;
+  total_pnl_usd: number;
+  is_statistically_significant: boolean;
+}
+
+export interface SlippagePostMortem {
+  total_analyzed_trades: number;
+  average_slippage_pips: number;
+  max_adverse_slippage_pips: number;
+  adverse_execution_rate_pct: number;
+  favorable_execution_rate_pct: number;
+  zero_slippage_rate_pct: number;
+  total_slippage_cost_usd: number;
+  execution_quality_score: number;
+}
+
+export interface StrategyWeightAllocation {
+  strategy_id: string;
+  strategy_name: string;
+  current_status: string;
+  recommended_status: string;
+  risk_multiplier: number;
+  rebalance_reason: string;
+  is_throttled: boolean;
+}

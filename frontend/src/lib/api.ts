@@ -196,4 +196,29 @@ export const api = {
     );
   },
 
+
+  // ============= ADVANCED ANALYTICS ENDPOINTS =============
+  getRollingMetrics: async () => {
+    return request<any>(
+      'getRollingMetrics',
+      API_BASE + '/api/analytics/rolling-metrics',
+      { headers: defaultHeaders() }
+    );
+  },
+
+  getSlippageReport: async () => {
+    return request<any>(
+      'getSlippageReport',
+      API_BASE + '/api/analytics/slippage-report',
+      { headers: defaultHeaders() }
+    );
+  },
+
+  getStrategyWeights: async () => {
+    return request<any[]>(
+      'getStrategyWeights',
+      API_BASE + '/api/analytics/strategy-weights',
+      { headers: defaultHeaders() }
+    );
+  },
 };

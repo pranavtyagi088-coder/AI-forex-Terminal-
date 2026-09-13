@@ -24,14 +24,10 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/e2e/**', '**/dist/**'],
-    pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-        isolate: false,
-      },
-    },
+    isolate: false,
     fileParallelism: false,
+    maxWorkers: 1,
+    minWorkers: 1,
     testTimeout: 30000,
     hookTimeout: 30000,
   },

@@ -1,8 +1,14 @@
 import pytest
-import pathlib
+from pathlib import Path
 from app.core.config import Settings
 from app.engines.telemetry.redis_bus import RedisTelemetryBus
 from app.core.database import init_db
+
+
+def get_project_root() -> Path:
+    """Resolve project root (WelcomeScreen directory) from tests directory."""
+    # test_production_infra.py -> tests -> backend -> WelcomeScreen (3 parents up)
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def test_database_url_normalization_asyncpg():
@@ -43,8 +49,9 @@ async def test_init_db_schema_creation():
 
 
 def test_docker_compose_file_validity():
-    dc = pathlib.Path("docker-compose.yml")
-    assert dc.exists()
+    root = get_project_root()
+    dc = root / "docker-compose.yml"
+    assert dc.exists(), f"docker-compose.yml not found at {dc}"
     content = dc.read_text(encoding="utf-8")
     assert "db:" in content
     assert "redis:" in content
@@ -54,8 +61,9 @@ def test_docker_compose_file_validity():
 
 
 def test_nginx_conf_websocket_and_api_proxy():
-    conf = pathlib.Path("frontend/nginx.conf")
-    assert conf.exists()
+    root = get_project_root()
+    conf = root / "frontend" / "nginx.conf"
+    assert conf.exists(), f"nginx.conf not found at {conf}"
     content = conf.read_text(encoding="utf-8")
     assert "location /api/" in content
     assert "location /ws/" in content

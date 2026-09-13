@@ -12,6 +12,7 @@ from app.engines.telemetry.redis_bus import redis_bus
 
 # ── Router Imports ──
 from app.api.routes.admin import router as admin_router
+from app.api.routes.analytics import router as analytics_router
 from app.api.routes.analysis import router as analysis_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.backtest import router as backtest_router
@@ -68,6 +69,7 @@ app.add_middleware(
 
 # ── Include All API Routers ──
 app.include_router(admin_router)
+app.include_router(analytics_router)
 app.include_router(analysis_router)
 app.include_router(auth_router)
 app.include_router(backtest_router)
